@@ -38,11 +38,11 @@
   label { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
           color: var(--tenue); margin: 14px 0 6px; }
   label:first-child { margin-top: 0; }
-  input[type=file], input[type=password] {
+  input[type=file], input[type=password], select {
     width: 100%; padding: 9px 10px; border: 1px solid var(--linea); border-radius: 5px;
     background: var(--papel); font: inherit; color: var(--tinta);
   }
-  input:focus-visible { outline: 2px solid var(--pen); outline-offset: 1px; }
+  input:focus-visible, select:focus-visible { outline: 2px solid var(--pen); outline-offset: 1px; }
   button {
     margin-top: 18px; width: 100%; padding: 11px; border: 0; border-radius: 5px;
     background: var(--pen); color: #fff; font: 600 15px 'IBM Plex Sans', sans-serif; cursor: pointer;
@@ -88,6 +88,15 @@
     <input type="file" id="pdf" accept="application/pdf">
     <label for="clave">Clave del PDF</label>
     <input type="password" id="clave" autocomplete="off">
+    <label for="banco">Banco</label>
+    <select id="banco">
+      <option value="auto" selected>Detectar automáticamente</option>
+      <option value="BCP">BCP</option>
+      <option value="BBVA">BBVA</option>
+      <option value="Interbank">Interbank</option>
+      <option value="Scotiabank">Scotiabank</option>
+      <option value="Diners">Diners Club</option>
+    </select>
     <button id="btn" onclick="procesar()">Conciliar</button>
     <div id="estado"></div>
   </div>
@@ -135,7 +144,7 @@
       google.script.run
         .withSuccessHandler(pintar)
         .withFailureHandler(e => { estado(e.message, true); $('btn').disabled = false; })
-        .conciliarTextoEstado(texto, archivo.name);
+        .conciliarTextoEstado(texto, archivo.name, $('banco').value);
 
     } catch (e) {
       const msg = (e && e.name === 'PasswordException')
@@ -150,8 +159,12 @@
     estado('');
     $('btn').disabled = false;
     $('pctNum').textContent = r.pct + '%';
-    $('pctDetalle').textContent = 'conciliado · ' + r.etiqueta;
-    $('metricas').textContent = r.transacciones + ' transacciones en el estado · ' +
+    $('pctDetalle').textContent = 'conciliado · ' + r.banco + ' · ' + r.etiqueta;
+    // El banco se muestra siempre: si se detectó mal, todo lo insertado queda
+    // con el rótulo equivocado y hay que verlo antes de confiar en el número.
+    $('metricas').textContent = 'Banco: ' + r.banco +
+      (r.bancoDetectado ? ' (detectado del PDF)' : ' (elegido a mano)') + ' · ' +
+      r.transacciones + ' transacciones en el estado · ' +
       r.coinciden + ' coinciden · ' + r.insertadas + ' insertadas al registro';
 
     const cont = $('sobrantes');
