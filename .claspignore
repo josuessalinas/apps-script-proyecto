@@ -1,0 +1,5 @@
+# clasp sube todos los .html como plantillas del proyecto.
+# Los correos de ejemplo no son plantillas: fuera.
+correos-ejemplo/**
+constancia-*.html
+*-BCP.html

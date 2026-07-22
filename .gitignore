@@ -141,3 +141,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Correos de ejemplo guardados para depurar parsers.
+# Son correos REALES con datos financieros: nunca deben ir a GitHub.
+correos-ejemplo/
+constancia-*.html
+*-BCP.html

@@ -95,9 +95,16 @@ const BUSQUEDA_BCP_RECIENTE =
 const HOJA_IGNORADOS = 'Correos Ignorados';
 const ENCABEZADOS_IGNORADOS = ['ID Mensaje', 'Fecha', 'Asunto', 'Motivo', 'Detalle'];
 
-/** Recorte del cuerpo antes de mandarlo. Los correos del BCP son cortos; 2500
- *  caracteres cubren de sobra el bloque de datos de la operación. */
-const MAX_CHARS_LLM_ = 2500;
+/**
+ * Recorte del cuerpo antes de mandarlo.
+ *
+ * Estaba en 2500 y un correo real de transferencia a terceros ya lo tocaba: el
+ * bloque de datos alcanzó a entrar, pero sin margen. Los correos del BCP traen
+ * un pie de página largo con avisos de seguridad que se come el presupuesto.
+ * 4000 deja holgura sin que el costo se dispare, porque esto solo aplica a los
+ * correos que el parser determinista no supo leer.
+ */
+const MAX_CHARS_LLM_ = 4000;
 
 /**
  * Tipos de movimiento válidos.
@@ -368,6 +375,12 @@ function interpretarCorreoBCPCrudo_(msg) {
     '- "comercio" es la contraparte: el nombre del negocio, o de la persona a ' +
     'quien se le yapeó / transfirió, o el servicio pagado. Si es un retiro de ' +
     'cajero, usa "Retiro cajero" más la agencia si aparece.\n' +
+    '- Si el correo trae un campo "Mensaje", "Concepto" o "Glosa" escrito por el ' +
+    'usuario (por ejemplo "Cuarto 3", "alquiler", "almuerzo"), agrégalo entre ' +
+    'paréntesis al final del comercio: "Figueroa Vidal (Cuarto 3)". Suele ser ' +
+    'la ÚNICA pista de para qué fue la transferencia, y sin ella el movimiento ' +
+    'queda como un nombre propio imposible de categorizar. Cópialo literal, no ' +
+    'lo interpretes ni lo traduzcas.\n' +
     '- "fecha": la de la operación, no la del envío del correo. Si el correo no ' +
     'dice la hora, usa 00:00. Si no dice la fecha, devuelve "".\n' +
     '- "ultimos4" y "num_operacion": "" si no aparecen. Nunca los inventes.\n' +
