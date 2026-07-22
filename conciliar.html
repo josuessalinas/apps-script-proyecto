@@ -60,6 +60,13 @@
   .metricas { color: var(--tenue); font-size: 14px; margin-top: 4px; }
   h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--tenue); margin: 22px 0 8px; }
   .sobrante { padding: 7px 2px; border-bottom: 1px solid var(--linea); font-size: 13.5px; }
+
+  .tema{width:32px;height:32px;border:1px solid var(--linea-2);background:var(--tarjeta);
+  color:var(--tenue);border-radius:7px;display:grid;place-items:center;cursor:pointer;padding:0;flex:0 0 auto;}
+  .tema:hover{color:var(--tinta);}
+  .tema svg{width:16px;height:16px;display:none;}
+  html[data-theme="dark"] .tema .i-sun{display:block;}
+  html[data-theme="light"] .tema .i-moon{display:block;}
 </style>
 </head>
 <body>
@@ -103,14 +110,6 @@
   function estado(msg, esError) {
     $('estado').textContent = msg;
     $('estado').className = esError ? 'error' : '';
-  }
-
-  $('tema').addEventListener('click', function () {
-    var cur = document.documentElement.getAttribute('data-theme');
-    document.documentElement.setAttribute('data-theme', cur === 'light' ? 'dark' : 'light');
-  });
-  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-    document.documentElement.setAttribute('data-theme', 'light');
   }
 
   async function procesar() {
