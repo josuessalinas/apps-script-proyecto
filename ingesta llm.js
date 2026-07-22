@@ -172,7 +172,15 @@ function ingestarBCPAmplia() {
         // --- Paso 1: parsers deterministas. Gratis y exactos. ---
         mov = parsearDeterminista_(limpiarHtml_(msg.getBody()), id);
 
-        // --- Paso 2: solo si el parser no supo, entra DeepSeek. ---
+        // --- Paso 2: descarte por asunto. Gratis, antes de gastar el LLM. ---
+        if (!mov && esAsuntoNoMovimiento_(msg.getSubject())) {
+          registrarIgnorado_(hojaIgn, msg, 'no_movimiento', 'descartado por asunto');
+          ignorados.add(id);
+          conNoMov = true; noMov++;
+          return;
+        }
+
+        // --- Paso 3: solo si nada de lo anterior supo, entra DeepSeek. ---
         if (!mov) {
           try {
             const interpretado = interpretarCorreoBCP_(msg);
@@ -193,7 +201,7 @@ function ingestarBCPAmplia() {
           }
         }
 
-        // --- Paso 3: validación determinista, igual para ambos caminos. ---
+        // --- Paso 4: validación determinista, igual para todos los caminos. ---
         try {
           validarMovimiento_(mov);
 
@@ -298,8 +306,70 @@ const REGLAS_TIPO_POR_ASUNTO_ = [
   { patron: /dep[óo]sito.*cajero|cajero.*dep[óo]sito/i, tipo: 'traspaso',
     razon: 'depósito de efectivo en cajero → vuelve a la cuenta propia' },
   { patron: /pago de tarjeta de cr[ée]dito propia/i, tipo: 'traspaso',
-    razon: 'pago de tarjeta propia → el gasto ya se registró en cada consumo' }
+    razon: 'pago de tarjeta propia → el gasto ya se registró en cada consumo' },
+
+  // El "wardadito" es el bolsillo de ahorro del BCP, dentro de las cuentas del
+  // propio titular. Aportar y retirar mueve dinero propio entre cuentas
+  // propias: traspaso en ambos sentidos. Marcarlo gasto/ingreso inflaría las
+  // dos columnas y distorsionaría el neto del mes.
+  // Ojo con las preposiciones: el BCP escribe "aporte voluntario A tu
+  // wardadito" pero "retiro DE tu wardadito".
+  { patron: /(aporte voluntario a|retiro de) tu wardadito/i, tipo: 'traspaso',
+    razon: 'wardadito → bolsillo de ahorro propio' },
+
+  { patron: /realizaste un retiro en un (cajero autom[áa]tico|agente)/i, tipo: 'gasto',
+    razon: 'retiro de efectivo → el sistema no rastrea el efectivo, se cuenta al salir' },
+  { patron: /realizamos una devoluci[óo]n/i, tipo: 'ingreso',
+    razon: 'devolución → dinero que vuelve a la cuenta' },
+  { patron: /recepci[óo]n de yapeo/i, tipo: 'ingreso',
+    razon: 'yapeo recibido' },
+  { patron: /yapear a celular/i, tipo: 'gasto',
+    razon: 'yapeo enviado' },
+  { patron: /constancia de pago de servicio/i, tipo: 'gasto',
+    razon: 'pago de servicio' }
 ];
+
+/**
+ * Asuntos que NO son movimientos de dinero. Se descartan por asunto, ANTES de
+ * llamar al LLM: en el histórico son ~63 correos que hoy costarían una llamada
+ * cada uno solo para que DeepSeek conteste "esto no es una transacción".
+ *
+ * El más importante de la lista es `se rechazó tu compra`: una compra rechazada
+ * NO ocurrió. Si el LLM la interpretara como consumo, entraría al registro un
+ * gasto que nunca existió. Eso no se delega.
+ *
+ * Ante la duda, NO agregues un asunto aquí: que lo decida el LLM. Un correo de
+ * más que cuesta una llamada es mucho mejor que un movimiento perdido (regla 5).
+ */
+const ASUNTOS_NO_MOVIMIENTO_ = [
+  /se rechaz[óo] tu compra/i,                    // la compra no ocurrió
+  /estado de cuenta de tu tarjeta/i,
+  /solicitud de copia de estado de cuenta/i,
+  /env[íi]o de otp|c[óo]digo de validaci[óo]n/i,
+  /token digital/i,
+  /c[óo]digo retiro sin tarjeta/i,               // el código, no el retiro
+  /cumpliste la meta de tu wardadito/i,
+  /wardadito ha sido creado/i,
+  /constancia de favorito/i,
+  /afiliaci[óo]n a banca m[óo]vil/i,
+  /constancia de configuraci[óo]n de tarjeta/i,
+  /constancia cambio de clave/i,
+  /activaci[óo]n de tu tarjeta de cr[ée]dito/i,
+  /emisi[óo]n de tarjeta de cr[ée]dito/i,
+  /bienvenid/i,
+  /nueva cuenta de ahorr/i,
+  /actualizado correctamente tu n[úu]mero de celular/i,
+  /constancia de seguridad de datos/i
+];
+
+/** ¿El asunto dice, sin ambigüedad, que esto no es una transacción? */
+function esAsuntoNoMovimiento_(asunto) {
+  const a = String(asunto || '');
+  for (let i = 0; i < ASUNTOS_NO_MOVIMIENTO_.length; i++) {
+    if (ASUNTOS_NO_MOVIMIENTO_[i].test(a)) return true;
+  }
+  return false;
+}
 
 /** Aplica REGLAS_TIPO_POR_ASUNTO_. Devuelve el tipo corregido. */
 function tipoSegunAsunto_(asunto, tipoLLM) {
@@ -772,6 +842,12 @@ function probarIngestaLLM() {
         Logger.log('Datos  : ' + JSON.stringify(movDet));
         return;
       }
+      if (esAsuntoNoMovimiento_(msg.getSubject())) {
+        Logger.log('Vía    : descartado POR ASUNTO (0 llamadas al LLM)');
+        Logger.log('Result : NO es movimiento → iría a "' + HOJA_IGNORADOS + '"');
+        return;
+      }
+
       Logger.log('Vía    : ningún parser lo entendió → va a DeepSeek');
 
       // Paso 2: DeepSeek.
