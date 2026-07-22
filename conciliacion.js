@@ -180,7 +180,10 @@ function cruzarItems_(items, banco) {
 
     hoja.appendRow([
       llave, item.fecha, item.tipo, item.monto, item.moneda, item.descripcion,
-      'sin_categoria', 'cuenta', banco, '', '', 'estado_cuenta', true, ''
+      // Un traspaso no lleva categoría de gasto: si quedara en 'sin_categoria',
+      // categorizarPendientes() gastaría una llamada al LLM para ponerle "Otros".
+      item.tipo === 'traspaso' ? 'Traspaso' : 'sin_categoria',
+      'cuenta', banco, '', '', 'estado_cuenta', true, ''
     ]);
     ids.add(llave);
     insertadas++;
@@ -201,6 +204,37 @@ function cruzarItems_(items, banco) {
   };
 }
 
+/**
+ * Reglas deterministas sobre la DESCRIPCIÓN de la línea del estado, hermanas de
+ * `REGLAS_TIPO_POR_ASUNTO_` en `ingesta llm.js`. Mismo principio: lo que ya está
+ * decidido por dominio no se le pregunta al LLM.
+ *
+ * Se mantienen deliberadamente estrechas. "PAGO RECIBIDO" en un estado de
+ * tarjeta es un traspaso, pero en uno de cuenta corriente puede ser un tercero
+ * pagándote; como no podemos distinguirlo aquí, esa frase se deja al prompt y
+ * solo se fijan los casos inequívocos.
+ */
+const REGLAS_TIPO_POR_DESCRIPCION_ = [
+  { patron: /pago\s+de\s+tarjeta|pago\s+tarj(eta)?\.?\s*cr[ée]d|amortizaci[óo]n\s+de\s+tarjeta/i,
+    tipo: 'traspaso', razon: 'pago de tarjeta propia' },
+  { patron: /dep[óo]sito.*cajero|cajero.*dep[óo]sito/i,
+    tipo: 'traspaso', razon: 'depósito de efectivo en cajero' },
+  { patron: /entre\s+cuentas\s+propias|a\s+cuenta\s+propia|traspaso\s+entre\s+cuentas/i,
+    tipo: 'traspaso', razon: 'movimiento entre cuentas propias' }
+];
+
+/**
+ * Fragmento de prompt con el nombre del titular, para que el LLM reconozca las
+ * transferencias a uno mismo. Reutiliza `nombreTitular_()` de `ingesta llm.js`:
+ * Apps Script junta todos los .js en un mismo ámbito global.
+ */
+function nombreTitularParaEstado_() {
+  const t = (typeof nombreTitular_ === 'function') ? nombreTitular_() : '';
+  if (!t) return '';
+  return 'El titular de estas cuentas se llama "' + t + '": si la contraparte de ' +
+    'una transferencia es esa misma persona, es traspaso y no gasto. ';
+}
+
 /** 1 llamada a DeepSeek. Devuelve solo transacciones que pasan la validación. */
 function llamarDeepSeekEstado_(texto) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('DEEPSEEK_API_KEY');
@@ -215,8 +249,17 @@ function llamarDeepSeekEstado_(texto) {
         role: 'system',
         content: 'Extraes transacciones de estados de cuenta bancarios peruanos. ' +
           'Responde SOLO JSON: {"transacciones":[{"fecha":"yyyy-mm-dd","descripcion":"...",' +
-          '"monto":0.00,"moneda":"PEN"|"USD","tipo":"gasto"|"ingreso"}]}. ' +
-          'monto siempre positivo. Cargos/consumos = gasto; abonos/pagos recibidos = ingreso. ' +
+          '"monto":0.00,"moneda":"PEN"|"USD","tipo":"gasto"|"ingreso"|"traspaso"}]}. ' +
+          'monto siempre positivo, el signo lo da el tipo. ' +
+          'Cargos y consumos hacia terceros = gasto. Abonos recibidos de terceros = ingreso. ' +
+          'traspaso = dinero que se mueve entre cuentas del MISMO titular y que por lo tanto ' +
+          'no es gasto ni ingreso: pago de la tarjeta de crédito propia (suele aparecer como ' +
+          '"PAGO DE TARJETA", "SU PAGO" o "PAGO RECIBIDO" en un estado de tarjeta), ' +
+          'transferencias entre cuentas propias, y depósitos de efectivo en cajero. ' +
+          'Marcar un traspaso como gasto hace que el sistema cuente el mismo dinero dos veces, ' +
+          'porque el gasto original ya está registrado aparte. ' +
+          'El retiro de efectivo en cajero SÍ es gasto. ' +
+          nombreTitularParaEstado_() +
           'Ignora saldos, totales, intereses informativos y líneas que no sean transacciones.'
       },
       { role: 'user', content: texto }
@@ -240,15 +283,41 @@ function llamarDeepSeekEstado_(texto) {
     const monto = Number(t.monto);
     const moneda = String(t.moneda).toUpperCase();
     const fecha = parsearFechaIso_(String(t.fecha));
-    const tipo = String(t.tipo) === 'ingreso' ? 'ingreso' : 'gasto';
     if (!(monto > 0) || (moneda !== 'PEN' && moneda !== 'USD') || !fecha) {
       Logger.log('Transacción inválida del LLM, descartada: ' + JSON.stringify(t));
       return;
     }
+
+    const descripcion = String(t.descripcion || '').trim() || 'estado de cuenta';
+    let tipo = String(t.tipo || '').toLowerCase();
+    if (tipo !== 'ingreso' && tipo !== 'traspaso') tipo = 'gasto';
+
+    // Redes deterministas, iguales a las de la ingesta por correo.
+    tipo = tipoSegunDescripcion_(descripcion, tipo);
+    if (tipo !== 'traspaso' && typeof esMismoTitular_ === 'function' &&
+        esMismoTitular_(descripcion)) {
+      Logger.log('Corregido a traspaso (contraparte = titular): ' + descripcion);
+      tipo = 'traspaso';
+    }
+
     validas.push({ fecha: fecha, monto: monto, moneda: moneda, tipo: tipo,
-      descripcion: String(t.descripcion || '').trim() || 'estado de cuenta' });
+      descripcion: descripcion });
   });
   return validas;
+}
+
+/** Aplica REGLAS_TIPO_POR_DESCRIPCION_. Devuelve el tipo corregido. */
+function tipoSegunDescripcion_(descripcion, tipoLLM) {
+  for (let i = 0; i < REGLAS_TIPO_POR_DESCRIPCION_.length; i++) {
+    const r = REGLAS_TIPO_POR_DESCRIPCION_[i];
+    if (r.patron.test(String(descripcion || ''))) {
+      if (tipoLLM !== r.tipo)
+        Logger.log('Tipo fijado por descripción: "' + tipoLLM + '" → "' + r.tipo +
+          '" (' + r.razon + ') en: ' + descripcion);
+      return r.tipo;
+    }
+  }
+  return tipoLLM;
 }
 
 function parsearFechaIso_(s) {

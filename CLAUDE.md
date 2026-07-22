@@ -122,6 +122,12 @@ como modificado es la señal de alarma.
    `gasto` es explícita en las dos vistas. Si agregas un tipo nuevo, revisa
    `obtenerDatosTablero` **y** `obtenerDatosAnalisis`.
 
+   El dinero entra al registro por **dos** puertas y las dos tienen que conocer
+   el tipo: los correos (`ingesta llm.js`) y los estados de cuenta en PDF
+   (`conciliacion.js`). Cerrar solo una deja el doble conteo entrando por la
+   otra. Cada una tiene sus reglas deterministas —`REGLAS_TIPO_POR_ASUNTO_` y
+   `REGLAS_TIPO_POR_DESCRIPCION_`— más `esMismoTitular_`, que comparten.
+
    El retiro de efectivo en cajero sí es `gasto`: el sistema no rastrea el
    efectivo, así que se cuenta al salir. Es una asimetría deliberada respecto
    del depósito.
