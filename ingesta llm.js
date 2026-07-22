@@ -62,11 +62,22 @@ const BUSQUEDA_BCP_AMPLIA =
  *  caracteres cubren de sobra el bloque de datos de la operación. */
 const MAX_CHARS_LLM_ = 2500;
 
+/**
+ * Tipos de movimiento válidos.
+ *
+ * 'traspaso' es dinero que se mueve entre cuentas del mismo titular: pagar la
+ * tarjeta de crédito propia, mover de ahorros a corriente. NO es gasto ni
+ * ingreso. Se registra igual —el registro debe ser literal— pero las vistas lo
+ * excluyen de los totales. Sin esto, pagar el estado de cuenta de la tarjeta
+ * contaría el mismo dinero dos veces: una en cada consumo y otra en el pago.
+ */
+const TIPOS_VALIDOS_ = ['gasto', 'ingreso', 'traspaso'];
+
 /** Métodos de pago que aceptamos del LLM. Validación determinista: cualquier
  *  cosa fuera de esta lista se normaliza a 'otro', no se escribe basura. */
 const METODOS_VALIDOS_ = [
   'yape', 'plin', 'transferencia', 'retiro_cajero', 'debito_automatico',
-  'tarjeta_debito', 'tarjeta_credito', 'pago_servicio', 'otro'
+  'tarjeta_debito', 'tarjeta_credito', 'pago_servicio', 'pago_tarjeta', 'otro'
 ];
 
 // ========================= INGESTA AMPLIADA =========================
@@ -179,7 +190,7 @@ function interpretarCorreoBCPCrudo_(msg) {
     'Esquema exacto:\n' +
     '{\n' +
     '  "es_movimiento": true|false,\n' +
-    '  "tipo": "gasto"|"ingreso",\n' +
+    '  "tipo": "gasto"|"ingreso"|"traspaso",\n' +
     '  "monto": number,\n' +
     '  "moneda": "PEN"|"USD",\n' +
     '  "fecha": "YYYY-MM-DD HH:mm",\n' +
@@ -194,10 +205,25 @@ function interpretarCorreoBCPCrudo_(msg) {
     'claves temporales, promociones, avisos de seguridad, avisos de que tu ' +
     'estado de cuenta está disponible, cambios de datos. En ese caso los demás ' +
     'campos pueden ir vacíos.\n' +
-    '- "gasto" es dinero que SALE de la cuenta (consumo, Yape enviado, ' +
-    'transferencia enviada, retiro, pago de servicio, débito automático). ' +
-    '"ingreso" es dinero que ENTRA (Yape/Plin recibido, transferencia recibida, ' +
-    'abono, devolución).\n' +
+    '- "gasto" es dinero que SALE hacia un tercero (consumo, Yape enviado a ' +
+    'otra persona, transferencia a un tercero, pago de un servicio, débito ' +
+    'automático).\n' +
+    '- "ingreso" es dinero que ENTRA desde un tercero (Yape/Plin recibido, ' +
+    'transferencia recibida, abono de sueldo, devolución).\n' +
+    '- "traspaso" es dinero que se mueve ENTRE CUENTAS DEL MISMO TITULAR: no ' +
+    'es riqueza que entra ni que sale. Es el caso más fácil de equivocar y el ' +
+    'más caro: si lo marcas "gasto", el sistema cuenta el mismo dinero dos ' +
+    'veces. Usa "traspaso" para:\n' +
+    '    * Pago de la tarjeta de crédito PROPIA (el asunto suele decir ' +
+    '"Constancia de Pago de Tarjeta de Crédito Propia"). El gasto ya se ' +
+    'registró cuando se hizo cada consumo con esa tarjeta; pagar el estado de ' +
+    'cuenta no es un gasto nuevo.\n' +
+    '    * Transferencias entre cuentas propias (ahorros ↔ corriente).\n' +
+    '  OJO: el retiro de efectivo en cajero NO es traspaso, es "gasto". El ' +
+    'sistema no sigue el rastro del efectivo, así que se cuenta al salir.\n' +
+    '  Si el correo dice "propia", "de tu tarjeta", "entre tus cuentas" o ' +
+    'similar, es traspaso. Si la contraparte es OTRA persona o un negocio, no ' +
+    'lo es.\n' +
     '- "monto" es el importe de la operación como número, sin símbolo ni comas. ' +
     'Siempre positivo, incluso para gastos: el signo lo da "tipo".\n' +
     '- "moneda": S/ o soles → "PEN". US$ o $ o dólares → "USD". NUNCA conviertas ' +
@@ -245,7 +271,7 @@ function movimientoDesdeLLM_(o, messageId, fechaCorreo) {
     throw new Error('El LLM reportó confianza baja. Queda para revisión manual.');
 
   const tipo = String(o.tipo || '').toLowerCase();
-  if (tipo !== 'gasto' && tipo !== 'ingreso')
+  if (TIPOS_VALIDOS_.indexOf(tipo) === -1)
     throw new Error('Tipo inválido del LLM: ' + o.tipo);
 
   const monto = Number(o.monto);

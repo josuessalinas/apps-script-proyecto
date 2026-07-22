@@ -72,14 +72,20 @@ function obtenerDatosTablero(offsetMes) {
   filas.forEach(function (f) {
     const fecha = f[1];
     if (!(fecha instanceof Date) || fecha < ini || fecha >= fin) return;
-    const tipo = String(f[2]);
+    // Normalizado: ahora la comparación de 'gasto' es explícita, así que un
+    // "Gasto" con mayúscula quedaría fuera de los totales sin avisar.
+    const tipo = String(f[2] || '').trim().toLowerCase();
     const monto = Number(f[3]);
     const moneda = String(f[4]);
     if (!(monto > 0) || (moneda !== 'PEN' && moneda !== 'USD')) return;
 
+    // 'traspaso' (pagar la tarjeta propia, mover entre cuentas propias) no es
+    // gasto ni ingreso: se lista en el detalle pero no entra a los totales.
+    // Antes el `else` se comía todo lo que no fuera 'ingreso' y lo contaba como
+    // gasto, lo que duplicaba el dinero al pagar el estado de cuenta.
     if (tipo === 'ingreso') {
       ingresos[moneda] += monto;
-    } else {
+    } else if (tipo === 'gasto') {
       gastos[moneda] += monto;
       const cat = String(f[6]) || 'sin_categoria';
       if (!porCategoria[cat]) porCategoria[cat] = { PEN: 0, USD: 0 };
