@@ -181,7 +181,37 @@ function interpretarCorreoBCP_(msg) {
   const crudo = interpretarCorreoBCPCrudo_(msg);
   if (!crudo.es_movimiento) return null;
 
-  return movimientoDesdeLLM_(crudo, msg.getId(), msg.getDate());
+  return movimientoDesdeLLM_(crudo, msg.getId(), msg.getDate(), msg.getSubject());
+}
+
+/**
+ * Tipos de correo cuya clasificación ya está DECIDIDA y no se delega al LLM.
+ *
+ * Por qué existe esta tabla: el asunto "Recibiste un depósito en tu cuenta a
+ * través de un cajero automático" empuja al modelo hacia "ingreso", y tiene su
+ * lógica —el correo no dice quién depositó el efectivo—. Pero la decisión ya
+ * está tomada a nivel de dominio, así que no se negocia con el prompt: se fija
+ * en código. El LLM sigue extrayendo monto, fecha y contraparte, que es lo que
+ * de verdad no podemos parsear solos.
+ */
+const REGLAS_TIPO_POR_ASUNTO_ = [
+  { patron: /dep[óo]sito.*cajero|cajero.*dep[óo]sito/i, tipo: 'traspaso',
+    razon: 'depósito de efectivo en cajero → vuelve a la cuenta propia' },
+  { patron: /pago de tarjeta de cr[ée]dito propia/i, tipo: 'traspaso',
+    razon: 'pago de tarjeta propia → el gasto ya se registró en cada consumo' }
+];
+
+/** Aplica REGLAS_TIPO_POR_ASUNTO_. Devuelve el tipo corregido. */
+function tipoSegunAsunto_(asunto, tipoLLM) {
+  for (let i = 0; i < REGLAS_TIPO_POR_ASUNTO_.length; i++) {
+    const r = REGLAS_TIPO_POR_ASUNTO_[i];
+    if (r.patron.test(String(asunto || ''))) {
+      if (tipoLLM !== r.tipo)
+        Logger.log('Tipo fijado por asunto: "' + tipoLLM + '" → "' + r.tipo + '" (' + r.razon + ')');
+      return r.tipo;
+    }
+  }
+  return tipoLLM;
 }
 
 /** La llamada pelada al LLM, sin convertir a `mov`. Separada para que el
@@ -341,7 +371,7 @@ function sanearParaLLM_(html) {
  * determinista todo lo que el LLM pudo haber alucinado.
  * `fechaCorreo` es el respaldo si el LLM no logró leer la fecha de operación.
  */
-function movimientoDesdeLLM_(o, messageId, fechaCorreo) {
+function movimientoDesdeLLM_(o, messageId, fechaCorreo, asunto) {
   if (String(o.confianza).toLowerCase() === 'baja')
     throw new Error('El LLM reportó confianza baja. Queda para revisión manual.');
 
@@ -349,8 +379,11 @@ function movimientoDesdeLLM_(o, messageId, fechaCorreo) {
   if (TIPOS_VALIDOS_.indexOf(tipo) === -1)
     throw new Error('Tipo inválido del LLM: ' + o.tipo);
 
-  // Red determinista: si la contraparte es el propio titular, es traspaso
-  // aunque el LLM haya dicho otra cosa. No confiamos el doble conteo al prompt.
+  // Redes deterministas. No confiamos el doble conteo al prompt.
+  // 1. Correos cuyo tipo ya está decidido por dominio.
+  tipo = tipoSegunAsunto_(asunto, tipo);
+
+  // 2. Si la contraparte es el propio titular, es traspaso diga lo que diga el LLM.
   if (tipo !== 'traspaso' && esMismoTitular_(o.comercio)) {
     Logger.log('Corregido a traspaso (contraparte = titular): ' + o.comercio);
     tipo = 'traspaso';
@@ -468,7 +501,7 @@ function probarIngestaLLM() {
           return;
         }
 
-        const mov = movimientoDesdeLLM_(crudo, msg.getId(), msg.getDate());
+        const mov = movimientoDesdeLLM_(crudo, msg.getId(), msg.getDate(), msg.getSubject());
         validarMovimiento_(mov);
         Logger.log('Result : SE INSERTARÍA → ' + JSON.stringify(mov));
       } catch (e) {
