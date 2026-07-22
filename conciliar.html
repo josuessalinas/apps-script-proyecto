@@ -105,6 +105,14 @@
     $('estado').className = esError ? 'error' : '';
   }
 
+  $('tema').addEventListener('click', function () {
+    var cur = document.documentElement.getAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', cur === 'light' ? 'dark' : 'light');
+  });
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+
   async function procesar() {
     const archivo = $('pdf').files[0];
     if (!archivo) { estado('Elige un PDF primero.', true); return; }

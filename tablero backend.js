@@ -120,5 +120,5 @@ function obtenerDatosTablero(offsetMes) {
       conciliados: conciliados,
       pct: conciliables > 0 ? Math.round(conciliados / conciliables * 100) : null
     }
-  }; // <- El error de sintaxis estaba aquí (faltaba cerrar el objeto y la función)
+  };
 }
