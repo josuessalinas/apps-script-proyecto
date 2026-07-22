@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark" data-cur="PEN">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+<style>
+  :root{
+    --papel:#F2F4F1; --tinta:#1C2321; --tenue:#6B746F; --linea:#D6DBD6;
+    --pen:#1F6E52; --usd:#3D5A80; --clay:#9A4A2E; --tarjeta:#FCFDFC;
+  }
+  html[data-cur="PEN"]{ --accent:var(--pen); }
+  html[data-cur="USD"]{ --accent:var(--usd); }
+  *{box-sizing:border-box;margin:0}
+  body{
+    background:var(--papel); color:var(--tinta);
+    font:15px/1.5 'IBM Plex Sans',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:22px 16px calc(46px + env(safe-area-inset-bottom));
+    max-width:480px; margin:0 auto;
+  }
+  .num{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+
+  header{margin-bottom:16px;}
+  .top{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px;}
+  h1{font-size:15px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;}
+  .volver{color:var(--tenue);text-decoration:none;font-size:13.5px;}
+  .volver:hover{color:var(--tinta);}
+
+  .seg{display:inline-flex;border:1px solid var(--linea);border-radius:6px;overflow:hidden;background:var(--tarjeta);}
+  .seg button{
+    border:0;background:transparent;color:var(--tenue);
+    font:600 12.5px/1 'IBM Plex Sans';letter-spacing:.06em;
+    padding:9px 20px;cursor:pointer;transition:.15s;
+  }
+  .seg button+button{border-left:1px solid var(--linea);}
+  .seg button.on{background:var(--accent);color:#fff;}
+
+  .caja{background:var(--tarjeta);border:1px solid var(--linea);border-radius:8px;padding:16px 16px 14px;margin-top:13px;}
+  .caja h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--tenue);}
+  .caja .sub{font-size:12.5px;color:var(--tenue);margin-top:2px;}
+  .caja .hd{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+  .hd .marca{font-size:12px;color:var(--accent);font-weight:600;}
+
+  /* Lista de gastos */
+  .rows{margin-top:8px;}
+  .row{display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--linea);}
+  .row:last-child{border-bottom:0;padding-bottom:2px;}
+  .row .tick{width:3px;align-self:stretch;border-radius:2px;background:var(--catc,var(--linea));flex:0 0 auto;}
+  .row .m{min-width:0;flex:1;}
+  .row .m b{display:block;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .row .m small{color:var(--tenue);font-size:12px;text-transform:capitalize;}
+  .row .amt{font-size:14px;white-space:nowrap;}
+
+  .chart{width:100%;}
+  #c7{height:188px;} #cDonut{height:236px;} #cPago{height:188px;}
+
+  .leyenda{display:flex;gap:16px;margin-top:6px;font-size:12px;color:var(--tenue);}
+  .leyenda i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;}
+
+  .vacio{padding:26px 6px;text-align:center;color:var(--tenue);font-size:13px;}
+  footer{margin-top:18px;font-size:12px;color:var(--tenue);text-align:center;line-height:1.5;}
+  .tema{width:32px;height:32px;border:1px solid var(--linea-2);background:var(--tarjeta);
+  color:var(--tenue);border-radius:7px;display:grid;place-items:center;cursor:pointer;padding:0;}
+  .tema:hover{color:var(--tinta);}
+  .tema svg{width:16px;height:16px;display:none;}
+  html[data-theme="dark"] .tema .i-sun{display:block;}
+  html[data-theme="light"] .tema .i-moon{display:block;}
+</style>
+</head>
+<body>
+  <header>
+    <div class="top">
+      <h1>Móvil</h1>
+      <a class="volver" href="<?= url ?>">‹ Tablero</a>
+    </div>
+    <div class="seg" id="seg">
+      <button data-cur="PEN" class="on">S/ PEN</button>
+      <button data-cur="USD">US$ USD</button>
+    </div>
+  </header>
+
+  <div id="app">
+    <p class="vacio">Leyendo el libro mayor…</p>
+  </div>
+
+  <footer>Montos en moneda nativa · <b>sin conversión</b>. El acento cambia según la moneda.</footer>
+
+<script>
+/* ===== Estado y constantes ===== */
+var S = { cur:'PEN', mov:[] };
+var SIMB = { PEN:'S/', USD:'US$' };
+var CO = { pen:'#1F6E52', usd:'#3D5A80', clay:'#9A4A2E',
+           tinta:'#1C2321', tenue:'#6B746F', linea:'#D6DBD6', tarjeta:'#FCFDFC' };
+var MES3 = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+var accent = function(){ return S.cur === 'PEN' ? CO.pen : CO.usd; };
+
+var CAT_COLOR = {
+  'Alimentación':'#1F6E52','Restaurantes/Delivery':'#9A4A2E','Transporte':'#3D5A80',
+  'Hogar':'#6B8F71','Servicios/Suscripciones':'#B0894F','Salud':'#8E5A7C',
+  'Entretenimiento':'#4E7C8B','Compras':'#C06B4A','Retiros efectivo':'#7A8471',
+  'Educación':'#55738F','Otros':'#9AA39D','sin_categoria':'#C2C8C2'
+};
+var catColor = function(c){ return CAT_COLOR[c] || '#9AA39D'; };
+var catLabel = function(c){ return c === 'sin_categoria' ? 'Sin categoría' : c; };
+
+var MET_LABEL = { tarjeta_debito:'Tarjeta de débito', tarjeta_credito:'Tarjeta de crédito',
+  cuenta:'Cuenta', efectivo:'Efectivo', yape:'Yape', plin:'Plin', transferencia:'Transferencia' };
+var metLabel = function(x){
+  if (MET_LABEL[x]) return MET_LABEL[x];
+  if (!x) return 'Otro';
+  return x.charAt(0).toUpperCase() + x.slice(1).replace(/_/g,' ');
+};
+
+/* ===== Utilidades ===== */
+var iso = function(d){ return d.getFullYear() + '-' +
+  String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); };
+var parseF = function(f){ var p = String(f).split('-'); return new Date(+p[0], +p[1]-1, +p[2]); };
+var fmt = function(n){ return SIMB[S.cur] + ' ' + n.toLocaleString('es-PE',{minimumFractionDigits:2, maximumFractionDigits:2}); };
+var enMoneda = function(){ return S.mov.filter(function(m){ return m.cur === S.cur; }); };
+
+/* ===== Carga de datos (producción o muestra) ===== */
+function normalizar(resp){
+  var arr = (resp && resp.movimientos) ? resp.movimientos : [];
+  S.mov = arr.map(function(r){
+    return { f:String(r.f), t:String(r.t), m:Number(r.m),
+             cur:String(r.cur||'PEN').toUpperCase(),
+             cat:String(r.cat||'Otros'), com:String(r.com||'—'), met:String(r.met||'') };
+  });
+  render();
+}
+function cargar(){
+  if (typeof google !== 'undefined' && google.script && google.script.run){
+    google.script.run
+      .withSuccessHandler(normalizar)
+      .withFailureHandler(function(e){
+        document.getElementById('app').innerHTML =
+          '<p class="vacio">No se pudo leer el Sheet: ' + (e && e.message ? e.message : e) + '. Recarga.</p>';
+      })
+      .obtenerDatosAnalisis();
+  } else {
+    normalizar(generarMuestra());   // fuera de Apps Script (vista previa)
+  }
+}
+
+/* ===== Estructura de tarjetas (una sola vez) ===== */
+var ch7, chDonut, chPago, montado = false;
+function montar(){
+  document.getElementById('app').innerHTML =
+    '<section class="caja">' +
+      '<div class="hd"><div><h2>Últimos gastos</h2><p class="sub">Tus 5 movimientos más recientes</p></div><span class="marca" id="marcaMon">S/</span></div>' +
+      '<div class="rows" id="lista"></div>' +
+    '</section>' +
+    '<section class="caja">' +
+      '<div class="hd"><div><h2>Últimos 7 días</h2><p class="sub">Gastos e ingresos por día</p></div></div>' +
+      '<div id="c7" class="chart"></div>' +
+      '<div class="leyenda"><span><i style="background:' + CO.clay + '"></i>Gastos</span><span><i style="background:' + CO.pen + '"></i>Ingresos</span></div>' +
+    '</section>' +
+    '<section class="caja">' +
+      '<div class="hd"><div><h2>A dónde va</h2><p class="sub">Gasto por categoría · este mes</p></div></div>' +
+      '<div id="cDonut" class="chart"></div>' +
+    '</section>' +
+    '<section class="caja">' +
+      '<div class="hd"><div><h2>Métodos de pago</h2><p class="sub">Tus preferidos · últimos 30 días</p></div></div>' +
+      '<div id="cPago" class="chart"></div>' +
+    '</section>';
+  ch7 = echarts.init(document.getElementById('c7'), null, {renderer:'svg'});
+  chDonut = echarts.init(document.getElementById('cDonut'), null, {renderer:'svg'});
+  chPago = echarts.init(document.getElementById('cPago'), null, {renderer:'svg'});
+  window.addEventListener('resize', function(){ ch7.resize(); chDonut.resize(); chPago.resize(); });
+  montado = true;
+}
+var ttip = function(){ return { backgroundColor:CO.tarjeta, borderColor:CO.linea, borderWidth:1,
+  textStyle:{color:CO.tinta, fontFamily:'IBM Plex Sans', fontSize:12},
+  extraCssText:'border-radius:6px;box-shadow:0 6px 20px rgba(28,35,33,.12)' }; };
+
+/* ===== Render ===== */
+function render(){
+  if (!montado) montar();
+  renderLista(); render7(); renderDonut(); renderPago();
+}
+
+/* 1) Últimos 5 gastos */
+function renderLista(){
+  document.getElementById('marcaMon').textContent = SIMB[S.cur];
+  var g = enMoneda().filter(function(m){ return m.t === 'gasto'; })
+    .sort(function(a,b){ return a.f < b.f ? 1 : a.f > b.f ? -1 : 0; }).slice(0,5);
+  var cont = document.getElementById('lista');
+  if (!g.length){ cont.innerHTML = '<div class="vacio">Sin gastos en ' + S.cur + '</div>'; return; }
+  cont.innerHTML = g.map(function(x){
+    var d = parseF(x.f), fecha = d.getDate() + ' ' + MES3[d.getMonth()];
+    return '<div class="row"><span class="tick" style="--catc:' + catColor(x.cat) + '"></span>' +
+      '<span class="m"><b>' + esc(x.com) + '</b><small>' + esc(catLabel(x.cat)) + ' · ' + fecha + '</small></span>' +
+      '<span class="amt num">' + fmt(x.m) + '</span></div>';
+  }).join('');
+}
+
+/* 2) Últimos 7 días (área) */
+function render7(){
+  var hoy = new Date(); hoy.setHours(0,0,0,0);
+  var keys = [], labels = [];
+  for (var i=6;i>=0;i--){ var d = new Date(hoy); d.setDate(hoy.getDate()-i);
+    keys.push(iso(d)); labels.push(MES3[d.getMonth()] + ' ' + d.getDate()); }
+  var g = {}, ing = {};
+  keys.forEach(function(k){ g[k]=0; ing[k]=0; });
+  enMoneda().forEach(function(m){ if (m.f in g){ if (m.t==='gasto') g[m.f]+=m.m; else ing[m.f]+=m.m; } });
+  var serieG = keys.map(function(k){ return +g[k].toFixed(2); });
+  var serieI = keys.map(function(k){ return +ing[k].toFixed(2); });
+  var area = function(c){ return { color:{ type:'linear', x:0,y:0,x2:0,y2:1,
+    colorStops:[{offset:0,color:c+'33'},{offset:1,color:c+'05'}] } }; };
+  ch7.setOption({
+    grid:{left:6,right:12,top:12,bottom:20,containLabel:true},
+    tooltip:Object.assign({trigger:'axis', valueFormatter:function(v){ return fmt(v); }}, ttip()),
+    xAxis:{type:'category', data:labels, boundaryGap:false,
+      axisLine:{lineStyle:{color:CO.linea}}, axisTick:{show:false},
+      axisLabel:{color:CO.tenue, fontSize:10}},
+    yAxis:{type:'value', splitLine:{lineStyle:{color:CO.linea, type:'dashed'}},
+      axisLabel:{color:CO.tenue, fontSize:9, formatter:function(v){ return v>=1000 ? (v/1000)+'k' : v; }}},
+    series:[
+      {name:'Gastos', type:'line', smooth:true, symbol:'none', data:serieG,
+        lineStyle:{width:2.2, color:CO.clay}, areaStyle:area(CO.clay)},
+      {name:'Ingresos', type:'line', smooth:true, symbol:'none', data:serieI,
+        lineStyle:{width:2.2, color:CO.pen}, areaStyle:area(CO.pen)}
+    ]
+  }, true);
+}
+
+/* 3) A dónde va (donut, mes actual) */
+function renderDonut(){
+  var pref = iso(new Date()).slice(0,7); // yyyy-MM
+  var map = {};
+  enMoneda().forEach(function(m){
+    if (m.t==='gasto' && m.f.slice(0,7)===pref) map[m.cat] = (map[m.cat]||0) + m.m;
+  });
+  var data = Object.keys(map).map(function(k){
+    return { name:catLabel(k), value:+map[k].toFixed(2), itemStyle:{color:catColor(k)} };
+  }).sort(function(a,b){ return b.value-a.value; });
+  var total = data.reduce(function(s,d){ return s+d.value; }, 0);
+  if (!data.length){
+    chDonut.clear();
+    chDonut.setOption({ graphic:{type:'text',left:'center',top:'middle',
+      style:{text:'Sin gastos este mes', fill:CO.tenue, fontSize:13, fontFamily:'IBM Plex Sans'}} });
+    return;
+  }
+  chDonut.setOption({
+    tooltip:Object.assign({valueFormatter:function(v){ return fmt(v); }}, ttip()),
+    legend:{bottom:0, left:'center', icon:'circle', itemWidth:8, itemHeight:8, itemGap:12,
+      textStyle:{color:CO.tenue, fontSize:11, fontFamily:'IBM Plex Sans'}},
+    series:[{
+      type:'pie', radius:['54%','75%'], center:['50%','44%'], avoidLabelOverlap:true, padAngle:2,
+      itemStyle:{borderColor:CO.tarjeta, borderWidth:2, borderRadius:4},
+      label:{show:true, position:'center',
+        formatter:function(){ return '{a|' + SIMB[S.cur] + ' ' + total.toLocaleString('es-PE',{maximumFractionDigits:0}) + '}\n{b|Total mes}'; },
+        rich:{ a:{color:CO.tinta, fontSize:19, fontWeight:600, fontFamily:'IBM Plex Mono'},
+               b:{color:CO.tenue, fontSize:11, padding:[3,0,0,0], fontFamily:'IBM Plex Sans'} }},
+      labelLine:{show:false}, emphasis:{label:{show:true}}, data:data
+    }]
+  }, true);
+}
+
+/* 4) Métodos de pago (barras, últimos 30 días) */
+function renderPago(){
+  var hoy = new Date(); var lim = new Date(hoy); lim.setDate(hoy.getDate()-30);
+  var limKey = iso(lim);
+  var map = {};
+  enMoneda().forEach(function(m){
+    if (m.t==='gasto' && m.f >= limKey) map[m.met] = (map[m.met]||0) + m.m;
+  });
+  var arr = Object.keys(map).map(function(k){ return { k:metLabel(k), v:+map[k].toFixed(2) }; })
+    .sort(function(a,b){ return a.v-b.v; }); // asc para barras horizontales
+  if (!arr.length){
+    chPago.clear();
+    chPago.setOption({ graphic:{type:'text',left:'center',top:'middle',
+      style:{text:'Sin datos', fill:CO.tenue, fontSize:13, fontFamily:'IBM Plex Sans'}} });
+    return;
+  }
+  var a = accent();
+  chPago.setOption({
+    grid:{left:6, right:52, top:4, bottom:4, containLabel:true},
+    tooltip:Object.assign({valueFormatter:function(v){ return fmt(v); }}, ttip()),
+    xAxis:{type:'value', splitLine:{show:false}, axisLabel:{show:false}, axisTick:{show:false}, axisLine:{show:false}},
+    yAxis:{type:'category', data:arr.map(function(x){ return x.k; }),
+      axisLine:{show:false}, axisTick:{show:false},
+      axisLabel:{color:CO.tinta, fontSize:11.5, fontFamily:'IBM Plex Sans'}},
+    series:[{
+      type:'bar', data:arr.map(function(x){ return x.v; }), barWidth:14,
+      itemStyle:{ borderRadius:[0,4,4,0],
+        color:{type:'linear', x:0,y:0,x2:1,y2:0, colorStops:[{offset:0,color:a+'59'},{offset:1,color:a}]} },
+      label:{show:true, position:'right', color:CO.tenue, fontSize:10.5, fontFamily:'IBM Plex Mono',
+        formatter:function(p){ return fmt(p.value); }}
+    }]
+  }, true);
+}
+
+function esc(s){ return String(s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+/* ===== Toggle de moneda ===== */
+document.getElementById('seg').addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b) return;
+  S.cur = b.getAttribute('data-cur');
+  document.documentElement.setAttribute('data-cur', S.cur);
+  Array.prototype.forEach.call(document.querySelectorAll('#seg button'), function(x){
+    x.classList.toggle('on', x.getAttribute('data-cur') === S.cur);
+  });
+  render();
+});
+
+/* ===== Datos de muestra (solo fuera de Apps Script) ===== */
+function generarMuestra(){
+  var comercios = {
+    'Alimentación':['Plaza Vea','Tottus','Wong','Metro'],
+    'Restaurantes/Delivery':['Rappi','PedidosYa','Bembos','La Lucha'],
+    'Transporte':['Uber','InDrive','Primax','Peaje'],
+    'Hogar':['Sodimac','Promart'],
+    'Servicios/Suscripciones':['Netflix','Spotify','Claro','Luz del Sur'],
+    'Salud':['Inkafarma','Mifarma'], 'Entretenimiento':['Cineplanet','Steam'],
+    'Compras':['Falabella','Ripley','H&M'], 'Retiros efectivo':['Cajero BCP'],
+    'Educación':['Platzi','Udemy'], 'Otros':['Varios']
+  };
+  var mets = ['tarjeta_credito','tarjeta_debito','yape','plin','efectivo','transferencia'];
+  var cats = Object.keys(comercios);
+  var pick = function(a){ return a[Math.floor(Math.random()*a.length)]; };
+  var out = [], hoy = new Date();
+  for (var dd=0; dd<95; dd++){
+    var d = new Date(hoy); d.setDate(hoy.getDate()-dd);
+    var f = iso(d);
+    ['PEN','USD'].forEach(function(cur){
+      var base = cur==='PEN' ? 3 : 1;
+      var n = Math.max(0, Math.round(base*Math.random() + (dd<7?0.6:0)));
+      for (var k=0;k<n;k++){
+        var cat = pick(cats), rango = cur==='PEN'?[8,240]:[3,90];
+        out.push({ f:f, t:'gasto', m:+(rango[0]+Math.random()*(rango[1]-rango[0])).toFixed(2),
+          cur:cur, cat:cat, com:pick(comercios[cat]), met:pick(mets) });
+      }
+    });
+    if (d.getDate()===1) out.push({f:f,t:'ingreso',m:1200,cur:'PEN',cat:'Otros',com:'Sueldo',met:'cuenta'});
+    if (dd%15===2) out.push({f:f,t:'ingreso',m:+(120+Math.random()*360).toFixed(2),
+      cur: Math.random()<.5?'PEN':'USD', cat:'Otros', com:'Freelance', met:'transferencia'});
+  }
+  return { movimientos: out, generado: new Date().toISOString() };
+}
+
+cargar();
+</script>
+</body>
+</html>
