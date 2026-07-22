@@ -146,6 +146,86 @@ function correccionBanco_(escribir) {
   }
 }
 
+// ============ 2-bis. NORMALIZAR LLAVES AL FORMATO CON BANCO ============
+//
+// Para cuando la columna Banco YA está corregida a mano en la hoja. Como el
+// banco correcto ya vive en la fila, la llave se puede reconstruir sin que
+// nadie tenga que identificar nada: es puramente mecánico.
+//
+// Por qué hace falta: las llaves viejas son `estado_cuenta|fecha|monto|moneda|n`
+// y las nuevas `estado_cuenta|BANCO|fecha|monto|moneda|n`. Si no se igualan,
+// volver a subir ese mismo estado de cuenta no reconoce las filas y las
+// inserta de nuevo, duplicadas.
+
+/** Muestra qué llaves reescribiría. No escribe. */
+function simularNormalizarLlaves() {
+  normalizarLlaves_(false);
+}
+
+/** Reescribe las llaves al formato con banco. */
+function aplicarNormalizarLlaves() {
+  normalizarLlaves_(true);
+}
+
+function normalizarLlaves_(escribir) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) { Logger.log('Otra corrida en curso. Salgo.'); return; }
+
+  try {
+    const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MOVIMIENTOS);
+    const n = hoja.getLastRow();
+    if (n < 2) { Logger.log('La hoja está vacía.'); return; }
+
+    const filas = hoja.getRange(2, 1, n - 1, 14).getValues();
+    const pendientes = [];
+
+    filas.forEach(function (f, i) {
+      if (String(f[11]) !== 'estado_cuenta') return;
+
+      const partes = String(f[0]).split('|');
+      // Formato viejo: la posición 1 es la fecha. En el nuevo es el banco.
+      if (partes[0] !== 'estado_cuenta' || !/^\d{4}-\d{2}-\d{2}$/.test(partes[1] || '')) return;
+
+      const banco = String(f[8]).trim();
+      if (!banco) {
+        Logger.log('Fila ' + (i + 2) + ' no tiene Banco. La salto: sin banco no hay llave.');
+        return;
+      }
+
+      pendientes.push({
+        fila: i + 2,
+        vieja: String(f[0]),
+        nueva: 'estado_cuenta|' + banco + '|' + partes.slice(1).join('|')
+      });
+    });
+
+    pendientes.forEach(function (p) {
+      Logger.log('Fila ' + p.fila + ': "' + p.vieja + '" → "' + p.nueva + '"');
+    });
+
+    // Detecta colisiones antes de escribir: dos filas que terminen con la misma
+    // llave romperían la idempotencia en vez de arreglarla.
+    const vistas = {}, choques = [];
+    pendientes.forEach(function (p) {
+      if (vistas[p.nueva]) choques.push(p.nueva);
+      vistas[p.nueva] = true;
+    });
+    if (choques.length > 0) {
+      Logger.log('ABORTO: estas llaves nuevas quedarían repetidas: ' + choques.join(', '));
+      Logger.log('Revísalas a mano antes de continuar. No se escribió nada.');
+      return;
+    }
+
+    if (escribir) pendientes.forEach(function (p) { hoja.getRange(p.fila, 1).setValue(p.nueva); });
+
+    Logger.log(escribir
+      ? '=== APLICADO: ' + pendientes.length + ' llaves normalizadas. ==='
+      : '=== SIMULACRO: ' + pendientes.length + ' llaves cambiarían. Nada se escribió. ===');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ===================== 3. LIMPIAR FALSOS "CONCILIADO" =====================
 //
 // No hay forma de saber qué movimientos del BCP fueron marcados por el cruce
