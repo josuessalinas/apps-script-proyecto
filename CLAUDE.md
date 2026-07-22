@@ -86,7 +86,8 @@ como modificado es la señal de alarma.
 
 | Archivo | Qué hace |
 |---|---|
-| `ingesta inicial bcp.js` | **Base del sistema.** Constantes globales (`HOJA_MOVIMIENTOS`, etiquetas), `setupInicial()`, el parser `parseBCP_()` y utilidades que todos los demás reutilizan: `cargarIdsExistentes_`, `escribirMovimiento_`, `categorizar_`, `validarMovimiento_`. |
+| `ingesta inicial bcp.js` | **Base del sistema.** Constantes globales (`HOJA_MOVIMIENTOS`, etiquetas), `setupInicial()`, el parser `parseBCP_()` y utilidades que todos los demás reutilizan: `cargarIdsExistentes_`, `escribirMovimiento_`, `categorizar_`, `validarMovimiento_`. `ingestarBCP()` quedó en desuso: cubría solo `subject:consumo`. |
+| `ingesta llm.js` | **Ingesta ampliada.** `ingestarBCPAmplia()` lee *todos* los correos del BCP. Cada uno pasa primero por `parseBCP_()`; solo si falla, el cuerpo saneado va a DeepSeek. Aquí viven las redes deterministas que corrigen al LLM: `REGLAS_TIPO_POR_ASUNTO_`, `esMismoTitular_`. `probarIngestaLLM()` es el simulacro. |
 | `categorizacion.js` | Categoriza con DeepSeek en lote, cacheando en la hoja `Mapeo de Categorías`. Aquí vive `corridaHoraria()` (ingesta → categorización) y el `instalarTriggerHorario()` bueno. |
 | `conciliacion.js` | Recibe el texto del PDF ya extraído en el navegador, lo pasa por DeepSeek y cruza contra `Movimientos` por moneda + monto + fecha ±3 días. |
 | `recurrentes.js` | Materializa ingresos fijos (sueldo, etc.) por mes, de forma idempotente. |
@@ -107,30 +108,72 @@ como modificado es la señal de alarma.
 
 ## Reglas del dominio — no las rompas
 
-1. **Nunca convertir monedas.** PEN y USD se tratan como mundos separados en
+1. **Nunca contar el mismo dinero dos veces.** Existe un tercer tipo de
+   movimiento además de `gasto` e `ingreso`: **`traspaso`**, para dinero que se
+   mueve entre cuentas del mismo titular — pagar la tarjeta de crédito propia,
+   transferir a tu cuenta en otro banco, depositar efectivo en tu cajero. Se
+   registra (el registro es literal) pero **no entra a los totales**. Pagar el
+   estado de cuenta de la tarjeta no es un gasto nuevo: el gasto ya se registró
+   en cada consumo.
+
+   Cuidado al tocar los agregadores: `tablero backend.js` tenía un `else` que
+   contaba como gasto todo lo que no fuera `ingreso`. Ahora la comparación de
+   `gasto` es explícita en las dos vistas. Si agregas un tipo nuevo, revisa
+   `obtenerDatosTablero` **y** `obtenerDatosAnalisis`.
+
+   El retiro de efectivo en cajero sí es `gasto`: el sistema no rastrea el
+   efectivo, así que se cuenta al salir. Es una asimetría deliberada respecto
+   del depósito.
+
+2. **Nunca convertir monedas.** PEN y USD se tratan como mundos separados en
    todo el sistema. No hay tipo de cambio en ninguna parte y es deliberado: el
    registro debe ser literal. Si algún día se agrega una vista consolidada,
    tiene que mostrar la tasa usada y su fecha, explícitamente.
 
-2. **Todo es idempotente.** Cada movimiento lleva una llave única en la columna
+3. **Todo es idempotente.** Cada movimiento lleva una llave única en la columna
    `ID Mensaje`: el ID del correo de Gmail, o una llave determinista como
    `recurrente|{id}|{yyyy-MM}` o `estado_cuenta|{fecha}|{monto}|{moneda}|{n}`.
    Correr cualquier función mil veces no debe duplicar ni una fila. Si agregas
    una fuente nueva, diséñale su llave antes de escribir código.
 
-3. **El registro es el activo.** Ante la duda, prioriza no perder ni corromper
+4. **El registro es el activo.** Ante la duda, prioriza no perder ni corromper
    datos por encima de cualquier otra cosa. Por eso `corridaHoraria()` envuelve
    la categorización en `try/catch`: si el LLM falla, la ingesta ya quedó a
    salvo.
 
-4. **Cero pérdidas silenciosas.** Un correo que no se pudo parsear se etiqueta
+5. **Cero pérdidas silenciosas.** Un correo que no se pudo parsear se etiqueta
    `error_parseo` y queda visible, nunca se descarta sin dejar rastro.
 
-5. **La clave del PDF jamás llega al servidor.** `conciliar.html` descifra el
+6. **Lo que sale hacia DeepSeek está acotado, y el LLM nunca tiene la última
+   palabra.** La regla vieja era "solo el nombre del comercio, nunca la
+   transacción". Con la ingesta ampliada dejó de ser cierta y así quedó:
+
+   - `categorizacion.js` sigue mandando **solo nombres de comercio**, en lote y
+     cacheados. No lo aflojes.
+   - `ingesta llm.js` manda el **cuerpo del correo**, pero únicamente de los que
+     `parseBCP_()` no supo leer — los consumos con tarjeta, que son la mayoría,
+     nunca salen. Antes de enviarlo, `sanearParaLLM_()` quita el HTML, enmascara
+     tarjetas y cuentas dejando los últimos 4 dígitos, y recorta a 2500
+     caracteres.
+   - **Todo lo que el LLM devuelve se re-valida de forma determinista** en
+     `movimientoDesdeLLM_()`: tipo, moneda, método y fecha con parseo estricto.
+     Si DeepSeek reporta `confianza: "baja"`, el correo se rechaza a
+     `error_parseo` en vez de entrar al registro.
+   - Cuando una decisión ya está tomada a nivel de dominio, **no se le pregunta
+     al LLM**: se fija en código (`REGLAS_TIPO_POR_ASUNTO_`). Se intentó
+     resolver el depósito en cajero afinando el prompt y el modelo lo ignoró
+     tres corridas seguidas. Afinar el prompt no es una estrategia de corrección.
+
+   No confíes en `ultimos4` cuando `Fuente` sea `correo_llm`: en correos con más
+   de una cuenta, DeepSeek elige una arbitrariamente y el valor cambia entre
+   corridas pese a `temperature: 0`. La conciliación cruza por moneda + monto +
+   fecha, no por ese campo.
+
+7. **La clave del PDF jamás llega al servidor.** `conciliar.html` descifra el
    PDF en el navegador con pdf.js y solo envía el texto extraído. No muevas esa
    frontera.
 
-6. **Todas las funciones que escriben toman `LockService`.** Respétalo al
+8. **Todas las funciones que escriben toman `LockService`.** Respétalo al
    agregar funciones nuevas que toquen el Sheet.
 
 ---
@@ -216,11 +259,22 @@ manejan el registro financiero real de una persona.
 
 Discutidas con el usuario, aún sin hacer:
 
-**1. Cobertura de ingesta — el hueco más grande.** `BUSQUEDA_BCP` filtra por
-`subject:consumo`, o sea solo consumos con tarjeta. Quedan fuera Yape, Plin,
-transferencias, retiros de cajero, débitos automáticos y cualquier otro banco.
-Consecuencia: el tablero subestima el gasto y el `% conciliado` nunca llegará a
-100% por diseño. **Este es el siguiente paso recomendado.**
+**1. Cobertura de ingesta — ~~el hueco más grande~~ hecho para el BCP
+(2026-07-22).** `ingestarBCPAmplia()` en `ingesta llm.js` ya cubre todo correo
+del BCP, no solo `subject:consumo`. Verificado en simulacro contra 5 correos
+reales: consumo, pago de tarjeta propia, transferencia a otro banco y depósito
+en cajero.
+
+Lo que queda de este punto:
+- **Otros bancos e Yape/Plin fuera del BCP** siguen sin cubrirse. Un banco
+  nuevo necesita su propia búsqueda de Gmail; el resto del flujo (parser →
+  LLM → validación determinista) se reutiliza tal cual.
+- `INGESTA_LLM_DESDE_` es un piso de fecha para que la primera corrida no se
+  tragara el histórico. Bajarlo es la forma de hacer backfill a propósito, y
+  cuesta una llamada al LLM por cada correo no-consumo.
+- Solo se probó contra 5 correos. Formatos que todavía no se han visto: Yape,
+  Plin, débito automático, retiro de cajero y cualquier cosa en USD. Revisa el
+  Log de las primeras corridas reales antes de confiarte.
 
 **2. Presupuestos por categoría.** Hoy el sistema registra pero no gobierna. Una
 hoja `Presupuestos` y una columna de varianza lo volverían una herramienta de

@@ -37,7 +37,10 @@ const MAX_COMERCIOS_POR_LLAMADA_ = 50;
 
 /** Corrida completa: ingesta y luego categorización. El trigger apunta aquí. */
 function corridaHoraria() {
-  ingestarBCP();
+  // Ingesta AMPLIADA (Fase 6): ya no solo `subject:consumo`. Todo correo del
+  // BCP pasa primero por el parser determinista y, si este no lo entiende,
+  // recién ahí lo interpreta DeepSeek. Ver `ingesta llm.js`.
+  ingestarBCPAmplia();
   try {
     categorizarPendientes();
   } catch (e) {
