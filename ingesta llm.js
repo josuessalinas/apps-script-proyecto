@@ -138,7 +138,13 @@ function ingestarBCPAmplia() {
         // --- Paso 3: validación determinista, igual para ambos caminos. ---
         try {
           validarMovimiento_(mov);
-          mov.categoria = categorizar_(mov.comercio, mapeo);
+
+          // Un traspaso no necesita categoría de gasto. Dejarlo en
+          // 'sin_categoria' haría que categorizarPendientes() le gastara una
+          // llamada al LLM para acabar poniéndole "Otros".
+          mov.categoria = (mov.tipo === 'traspaso')
+            ? 'Traspaso'
+            : categorizar_(mov.comercio, mapeo);
           mov.referencia = 'https://mail.google.com/mail/u/0/#all/' + id;
 
           escribirMovimiento_(hoja, mov);
@@ -218,7 +224,11 @@ function interpretarCorreoBCPCrudo_(msg) {
     '"Constancia de Pago de Tarjeta de Crédito Propia"). El gasto ya se ' +
     'registró cuando se hizo cada consumo con esa tarjeta; pagar el estado de ' +
     'cuenta no es un gasto nuevo.\n' +
-    '    * Transferencias entre cuentas propias (ahorros ↔ corriente).\n' +
+    '    * Transferencias entre cuentas propias (ahorros ↔ corriente), ' +
+    'incluidas las enviadas a una cuenta propia en OTRO banco.\n' +
+    '    * Depósitos de efectivo en cajero hacia la cuenta propia: es efectivo ' +
+    'que vuelve a la cuenta, no dinero nuevo.\n' +
+    reglaTitular_() +
     '  OJO: el retiro de efectivo en cajero NO es traspaso, es "gasto". El ' +
     'sistema no sigue el rastro del efectivo, así que se cuenta al salir.\n' +
     '  Si el correo dice "propia", "de tu tarjeta", "entre tus cuentas" o ' +
@@ -239,6 +249,71 @@ function interpretarCorreoBCPCrudo_(msg) {
     'equivocado al registro financiero. No adivines.';
 
   return llamarDeepSeekJson_(sistema, entrada);
+}
+
+// ================= RECONOCIMIENTO DEL TITULAR =================
+//
+// Una transferencia a tu propia cuenta en otro banco llega como "Constancia de
+// Transferencia a Otros Bancos" y la contraparte es tu propio nombre. Ni el
+// parser ni el LLM pueden saber que ese nombre eres tú: hay que decírselo.
+//
+// El nombre vive en Script Properties (clave TITULAR_NOMBRE), no en el código,
+// para no meter datos personales en el repositorio de GitHub.
+//
+//   Configuración del proyecto → Propiedades del script
+//   TITULAR_NOMBRE = Josue Sebastian Salinas Llana
+//
+// Si la propiedad no está puesta, el sistema NO adivina: sigue funcionando y
+// estas transferencias quedan como 'gasto', igual que antes.
+
+/** Nombre del titular, o '' si no está configurado. */
+function nombreTitular_() {
+  return String(
+    PropertiesService.getScriptProperties().getProperty('TITULAR_NOMBRE') || ''
+  ).trim();
+}
+
+/** Fragmento de prompt que le enseña al LLM a reconocer al titular. */
+function reglaTitular_() {
+  const t = nombreTitular_();
+  if (!t) return '';
+  return '    * IMPORTANTE: el titular de estas cuentas se llama "' + t + '". ' +
+    'Si la contraparte de una transferencia o depósito es esa misma persona ' +
+    '(aunque el nombre venga abreviado o con los apellidos en inicial, por ' +
+    'ejemplo "' + t.split(/\s+/).slice(0, 3).join(' ') + '."), entonces se está ' +
+    'mandando dinero a sí mismo: es "traspaso", nunca "gasto".\n';
+}
+
+/** Quita tildes y puntuación para poder comparar nombres. */
+function normalizarNombre_(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i')
+    .replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').replace(/ñ/g, 'n')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Red determinista por si el LLM no reconoce al titular pese al prompt.
+ * Exige 2 o más palabras del nombre en común, de 3+ letras, para no dispararse
+ * con un apellido suelto.
+ *
+ * Limitación conocida y aceptada: un familiar que comparta dos apellidos
+ * ("Salinas Llana, María") daría falso positivo y su transferencia quedaría
+ * como traspaso. Se prefiere ese error —una fila fuera de los totales, pero
+ * visible en el detalle— antes que contar dos veces el dinero propio.
+ */
+function esMismoTitular_(comercio) {
+  const titular = nombreTitular_();
+  if (!titular || !comercio) return false;
+
+  const tokensComercio = normalizarNombre_(comercio).split(' ');
+  const comunes = normalizarNombre_(titular).split(' ').filter(function (t) {
+    return t.length >= 3 && tokensComercio.indexOf(t) !== -1;
+  });
+  return comunes.length >= 2;
 }
 
 /**
@@ -270,9 +345,16 @@ function movimientoDesdeLLM_(o, messageId, fechaCorreo) {
   if (String(o.confianza).toLowerCase() === 'baja')
     throw new Error('El LLM reportó confianza baja. Queda para revisión manual.');
 
-  const tipo = String(o.tipo || '').toLowerCase();
+  let tipo = String(o.tipo || '').toLowerCase();
   if (TIPOS_VALIDOS_.indexOf(tipo) === -1)
     throw new Error('Tipo inválido del LLM: ' + o.tipo);
+
+  // Red determinista: si la contraparte es el propio titular, es traspaso
+  // aunque el LLM haya dicho otra cosa. No confiamos el doble conteo al prompt.
+  if (tipo !== 'traspaso' && esMismoTitular_(o.comercio)) {
+    Logger.log('Corregido a traspaso (contraparte = titular): ' + o.comercio);
+    tipo = 'traspaso';
+  }
 
   const monto = Number(o.monto);
   const moneda = String(o.moneda || '').toUpperCase();
