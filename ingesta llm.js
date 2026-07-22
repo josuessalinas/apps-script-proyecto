@@ -169,12 +169,8 @@ function ingestarBCPAmplia() {
 
         let mov = null, viaLLM = false;
 
-        // --- Paso 1: parser determinista. Gratis y exacto. ---
-        try {
-          mov = parseBCP_(limpiarHtml_(msg.getBody()), id);
-        } catch (e) {
-          mov = null;
-        }
+        // --- Paso 1: parsers deterministas. Gratis y exactos. ---
+        mov = parsearDeterminista_(limpiarHtml_(msg.getBody()), id);
 
         // --- Paso 2: solo si el parser no supo, entra DeepSeek. ---
         if (!mov) {
@@ -564,7 +560,144 @@ function llamarDeepSeekJson_(sistema, usuario) {
   return obj;
 }
 
+// ================= PARSERS DETERMINISTAS ADICIONALES =================
+//
+// Cada formato que se convierte en parser es una llamada al LLM que deja de
+// pagarse PARA SIEMPRE, en cada corrida y en cada backfill. Con 18 meses de
+// histórico por delante, esto es lo que hace viable el backfill.
+//
+// `parseBCP_` (en `ingesta inicial bcp.js`) cubre los consumos con tarjeta.
+// Aquí van los demás formatos, a medida que consigamos un correo de muestra.
+// Nunca se escribe un parser a ciegas: si no hay muestra, que lo haga el LLM.
+
+/**
+ * Transferencias del BCP: "Constancia de Transferencia a Terceros" y sus
+ * parientes. Verificado contra un correo real del 2026-07-01.
+ *
+ * Devuelve un `mov` o lanza error, igual que `parseBCP_`, para que el flujo de
+ * ingesta no tenga que distinguirlos.
+ */
+function parseTransferenciaBCP_(text, messageId) {
+  const mMonto = text.match(/Monto transferido\s*(S\/|US\$|\$)\s*([\d,]+\.\d{2})/);
+  if (!mMonto) throw new Error('No se encontró "Monto transferido"');
+  const moneda = (mMonto[1] === 'S/') ? 'PEN' : 'USD';
+  const monto = parseFloat(mMonto[2].replace(/,/g, ''));
+
+  const mF = text.match(/Fecha y hora\s*(\d{1,2}) de (\w+) de (\d{4})\s*-\s*(\d{1,2}):(\d{2})\s*(AM|PM)/);
+  if (!mF) throw new Error('No se encontró "Fecha y hora"');
+  const mes = MESES_[mF[2].toLowerCase()];
+  if (!mes) throw new Error('Mes no reconocido: ' + mF[2]);
+  let hh = parseInt(mF[4], 10);
+  if (mF[6] === 'PM' && hh !== 12) hh += 12;
+  if (mF[6] === 'AM' && hh === 12) hh = 0;
+  const fecha = new Date(+mF[3], mes - 1, +mF[1], hh, +mF[5]);
+
+  // Destinatario: "Enviado a Figueroa Vidal-vda-de-figueroa E. **** 7002 Moneda"
+  const mDest = text.match(/Enviado a\s*(.+?)\s*\*+\s*(\d{4})/);
+  if (!mDest) throw new Error('No se encontró el destinatario ("Enviado a")');
+  let comercio = mDest[1].trim();
+
+  // El concepto que escribe el usuario. Es la única pista de para qué fue la
+  // transferencia: sin él queda un nombre propio suelto, incategorizable.
+  const mMsg = text.match(/Mensaje\s*(.+?)\s*(?:Canal|N[úu]mero de operaci[óo]n)/);
+  const concepto = mMsg ? mMsg[1].trim() : '';
+  if (concepto && concepto.toLowerCase() !== 'sin mensaje') {
+    comercio += ' (' + concepto + ')';
+  }
+
+  const mOp = text.match(/N[úu]mero de operaci[óo]n\s*(\d+)/);
+  // Los últimos 4 de la cuenta ORIGEN, no la del destinatario.
+  const mDesde = text.match(/Desde\s+[^*]*?\*+\s*(\d{4})/);
+
+  // Transferirse a uno mismo no es gasto (regla 1). Misma red que usa el LLM.
+  const propia = (typeof esMismoTitular_ === 'function') && esMismoTitular_(mDest[1]);
+
+  return {
+    idMensaje: messageId, fecha: fecha, tipo: propia ? 'traspaso' : 'gasto',
+    monto: monto, moneda: moneda, comercio: comercio,
+    metodo: 'transferencia', banco: 'BCP',
+    ultimos4: mDesde ? mDesde[1] : '',
+    numOperacion: mOp ? mOp[1] : '',
+    fuente: 'correo'
+  };
+}
+
+/**
+ * Cadena de parsers deterministas, en orden. El primero que no lance gana.
+ * Agregar un formato aquí es lo que abarata el sistema.
+ */
+function parsearDeterminista_(texto, id) {
+  const parsers = [parseBCP_, parseTransferenciaBCP_];
+  for (let i = 0; i < parsers.length; i++) {
+    try {
+      const mov = parsers[i](texto, id);
+      validarMovimiento_(mov);
+      return mov;
+    } catch (e) { /* siguiente parser */ }
+  }
+  return null;
+}
+
 // ========================= DIAGNÓSTICO =========================
+
+/**
+ * INVENTARIO — cuenta los correos del BCP por tipo de asunto, sin gastar una
+ * sola llamada al LLM. Es la medición previa al backfill: dice cuántos correos
+ * hay, cuántos ya resuelve gratis un parser determinista y cuántos tendrían que
+ * ir al LLM.
+ *
+ * Ajusta INVENTARIO_DESDE_ para el rango que quieras medir. Solo lectura.
+ */
+const INVENTARIO_DESDE_ = '2025/01/01';
+
+function inventarioCorreosBCP() {
+  const asuntos = {};
+  let total = 0, hilos = 0;
+
+  // Se pagina porque GmailApp.search topa en ~500 hilos por llamada.
+  for (let inicio = 0; inicio < 2000; inicio += 100) {
+    const lote = GmailApp.search(
+      'from:notificacionesbcp.com.pe after:' + INVENTARIO_DESDE_, inicio, 100);
+    if (lote.length === 0) break;
+    hilos += lote.length;
+
+    lote.forEach(function (hilo) {
+      hilo.getMessages().forEach(function (msg) {
+        total++;
+        // Se normaliza el asunto para agrupar: fuera el sufijo del servicio.
+        const asunto = msg.getSubject()
+          .replace(/\s*-\s*Servicio de Notificaciones BCP\s*$/i, '')
+          .trim();
+        if (!asuntos[asunto]) asuntos[asunto] = { n: 0, ejemplo: msg.getId() };
+        asuntos[asunto].n++;
+      });
+    });
+  }
+
+  const orden = Object.keys(asuntos).sort(function (a, b) { return asuntos[b].n - asuntos[a].n; });
+
+  Logger.log('=== Correos del BCP desde ' + INVENTARIO_DESDE_ + ' ===');
+  Logger.log('Hilos: ' + hilos + ' · Mensajes: ' + total);
+  Logger.log('');
+  Logger.log('cantidad | asunto');
+  orden.forEach(function (a) {
+    Logger.log(pad2_(asuntos[a].n, 8) + ' | ' + a);
+  });
+  Logger.log('');
+  Logger.log('Los "Realizaste un consumo" y las transferencias ya los resuelve un');
+  Logger.log('parser determinista: 0 llamadas al LLM. El resto es el costo real');
+  Logger.log('del backfill, 1 llamada por correo mientras no tengan parser.');
+  Logger.log('Un ID de ejemplo por tipo, para conseguir muestras:');
+  orden.forEach(function (a) {
+    Logger.log('  ' + asuntos[a].ejemplo + '  ' + a.slice(0, 55));
+  });
+}
+
+function pad2_(v, n) {
+  let s = String(v);
+  while (s.length < n) s = ' ' + s;
+  return s;
+}
 
 /**
  * Lista los correos del BCP que NO están en la hoja ni en los ignorados,
@@ -632,16 +765,14 @@ function probarIngestaLLM() {
       Logger.log('Asunto : ' + msg.getSubject());
       Logger.log('Fecha  : ' + msg.getDate());
 
-      // Paso 1: ¿lo resuelve el parser determinista?
-      try {
-        const mov = parseBCP_(limpiarHtml_(msg.getBody()), msg.getId());
-        validarMovimiento_(mov);
+      // Paso 1: ¿lo resuelve alguno de los parsers deterministas?
+      const movDet = parsearDeterminista_(limpiarHtml_(msg.getBody()), msg.getId());
+      if (movDet) {
         Logger.log('Vía    : PARSER determinista (0 llamadas al LLM)');
-        Logger.log('Datos  : ' + JSON.stringify(mov));
+        Logger.log('Datos  : ' + JSON.stringify(movDet));
         return;
-      } catch (e) {
-        Logger.log('Vía    : el parser no supo (' + e.message + ') → va a DeepSeek');
       }
+      Logger.log('Vía    : ningún parser lo entendió → va a DeepSeek');
 
       // Paso 2: DeepSeek.
       try {
