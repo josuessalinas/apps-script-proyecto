@@ -222,8 +222,13 @@ function escribirMovimiento_(hoja, mov) {
   ]);
 }
 
-// ========================= TRIGGER =========================
-// NOTA: instalarTriggerHorario() vive en categorizacion.js (Fase 5), que apunta
-// a corridaHoraria() (ingesta + categorización). Tenerla definida también aquí
-// creaba dos funciones globales con el mismo nombre en el mismo proyecto: la que
-// quedara activa dependía del orden de carga de los archivos en Apps Script.
+// ========================= TRIGGER (instalar DESPUÉS de verificar) =========================
+
+function instalarTriggerHorario() {
+  // Evitar duplicados de trigger
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'ingestarBCP') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('ingestarBCP').timeBased().everyHours(1).create();
+  Logger.log('Trigger horario instalado para ingestarBCP.');
+}
