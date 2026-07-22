@@ -2,348 +2,215 @@
 <html lang="es" data-theme="dark">
 <head>
 <base target="_top">
-<meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<a href="<?= url ?>?page=analisis">Ver análisis →</a>
 <style>
-  /* ============ TERMINAL · sistema de diseño ============ */
   :root{
-    --amber:#FFA028; --cyan:#35A7DB; --up:#3FB950; --down:#E8453C;
-    --pen:#FFA028; --usd:#35A7DB;
+  /* colores de marca (iguales en claro y oscuro) */
+  --pen:#2962ff;   /* PEN → azul TradingView */
+  --usd:#ff9800;   /* USD → naranja */
+  --ingreso:#089981; /* verde alza */
+  --gasto:#f23645;   /* rojo baja */
   }
   html[data-theme="dark"]{
-    --bg:#0A0A0A; --panel:#101010; --panel2:#151515; --raised:#1C1C1C;
-    --line:#242424; --line2:#333333;
-    --text:#E6E6E6; --muted:#8C8C8C; --dim:#5A5A5A;
-    --topbar:#000000; --onamber:#0A0A0A; --zebra:rgba(255,255,255,.018);
+  --papel:#131722; --tarjeta:#1e222d; --linea:#2a2e39; --linea-2:#363a45;
+  --tinta:#d1d4dc; --tenue:#787b86; --alerta:#f23645; --sombra:0 6px 20px rgba(0,0,0,.40);
   }
   html[data-theme="light"]{
-    --bg:#F4F0E9; --panel:#FFFFFF; --panel2:#FBF9F5; --raised:#EDE8DF;
-    --line:#DAD3C7; --line2:#C3BAAA;
-    --text:#14120E; --muted:#665E52; --dim:#8A8071;
-    --topbar:#17140F; --onamber:#17140F; --zebra:rgba(0,0,0,.016);
-    --amber:#8A5000; --cyan:#125F8C; --up:#136B3C; --down:#AF2015;
-    --pen:#8A5000; --usd:#125F8C;
+  --papel:#f8f9fd; --tarjeta:#ffffff; --linea:#e0e3eb; --linea-2:#d1d4dc;
+  --tinta:#131722; --tenue:#787b86; --alerta:#f23645; --sombra:0 4px 14px rgba(19,23,34,.06);
   }
 
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{
-    background:var(--bg); color:var(--text);
-    font:400 13px/1.45 'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
-    -webkit-font-smoothing:antialiased;
+  
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--papel); color: var(--tinta);
+    font: 15px/1.5 'IBM Plex Sans', system-ui, sans-serif;
+    padding: 28px 18px 60px; max-width: 720px; margin: 0 auto;
   }
-  .num{font-variant-numeric:tabular-nums}
+  .num { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
 
-  /* ---- barra superior ---- */
-  .top{position:sticky;top:0;z-index:30;display:flex;align-items:stretch;height:34px;
-       background:var(--topbar);border-bottom:1px solid var(--line2)}
-  .tag{background:var(--amber);color:var(--onamber);font-weight:700;font-size:11px;
-       letter-spacing:.14em;display:flex;align-items:center;padding:0 11px}
-  .ttl{display:flex;align-items:center;padding:0 13px;font-size:11px;font-weight:600;
-       letter-spacing:.16em;color:#E6E6E6;white-space:nowrap}
-  nav{display:flex;align-items:stretch;margin-left:auto}
-  nav a,.navbtn{display:flex;align-items:center;gap:6px;padding:0 12px;color:#8C8C8C;
-       text-decoration:none;font:600 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.12em;
-       border:0;border-left:1px solid #2A2A2A;background:transparent;cursor:pointer}
-  nav a b,.navbtn b{color:var(--amber);font-weight:700}
-  nav a:hover,.navbtn:hover{background:#1C1C1C;color:#E6E6E6}
-  nav a[aria-current="page"]{background:#1C1C1C;color:#E6E6E6;box-shadow:inset 0 -2px 0 var(--amber)}
-  .navbtn svg{width:14px;height:14px;display:none}
-  html[data-theme="dark"] .navbtn .i-sun{display:block}
-  html[data-theme="light"] .navbtn .i-moon{display:block}
-
-  /* ---- barra de periodo ---- */
-  .per{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--line);
-       background:var(--panel2)}
-  .per .lb{font-size:10px;letter-spacing:.14em;color:var(--dim);padding:0 12px}
-  .per button{width:30px;height:29px;border:0;border-left:1px solid var(--line);
-       background:transparent;color:var(--text);cursor:pointer;font-size:14px;line-height:1}
-  .per button:hover:not(:disabled){background:var(--raised);color:var(--amber)}
-  .per button:disabled{color:var(--dim);cursor:default}
-  .per button:focus-visible{outline:1px solid var(--amber);outline-offset:-2px}
-  #mes{min-width:132px;text-align:center;font-weight:600;font-size:12px;
-       letter-spacing:.1em;text-transform:uppercase;color:var(--amber);
-       border-left:1px solid var(--line);padding:6px 0}
-  .per .spacer{flex:1}
-  .per .stamp{font-size:10px;color:var(--dim);letter-spacing:.08em;padding:0 12px}
-
-  main{max-width:1100px;margin:0 auto;padding:14px}
-
-  /* ---- panel ---- */
-  .pnl{border:1px solid var(--line);background:var(--panel);margin-bottom:12px}
-  .pnl-h{display:flex;align-items:center;justify-content:space-between;
-         background:var(--amber);color:var(--onamber);padding:4px 10px;
-         font-size:10px;font-weight:700;letter-spacing:.16em}
-  .pnl-h .r{font-weight:500;letter-spacing:.1em;opacity:.78}
-  .pnl-b{padding:0}
-
-  /* ---- tiles de moneda ---- */
-  .tiles{display:grid;grid-template-columns:1fr 1fr}
-  .tile{padding:13px 15px 14px}
-  .tile+.tile{border-left:1px solid var(--line)}
-  .tile .cur{font-size:10px;letter-spacing:.18em;color:var(--dim)}
-  .tile .cur i{font-style:normal;color:var(--acc);font-weight:700}
-  .tile.pen{--acc:var(--pen)} .tile.usd{--acc:var(--usd)}
-  .tile .big{font-size:27px;font-weight:600;color:var(--acc);margin-top:5px;line-height:1.1}
-  .tile .lbl{font-size:9.5px;letter-spacing:.14em;color:var(--dim);margin-top:1px}
-  .tile .rows{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
-  .tile .r{display:flex;justify-content:space-between;font-size:11.5px;padding:1.5px 0}
-  .tile .r span:first-child{color:var(--muted);letter-spacing:.06em}
-  .dlt{font-size:10.5px;font-weight:600;letter-spacing:.04em}
-  .dlt.pos{color:var(--up)} .dlt.neg{color:var(--down)} .dlt.nil{color:var(--dim)}
-  .net.pos{color:var(--up)} .net.neg{color:var(--down)}
-
-  /* ---- tablas ---- */
-  table{width:100%;border-collapse:collapse}
-  thead th{font-size:9.5px;letter-spacing:.14em;color:var(--dim);font-weight:600;
-           text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);
-           background:var(--panel2);white-space:nowrap}
-  thead th.r{text-align:right}
-  tbody td{padding:5px 10px;border-bottom:1px solid var(--line);font-size:12.5px;
-           vertical-align:middle}
-  tbody tr:nth-child(even){background:var(--zebra)}
-  tbody tr:hover{background:var(--raised)}
-  tbody tr:last-child td{border-bottom:0}
-  td.r{text-align:right;white-space:nowrap}
-  td.trunc{max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .swatch{display:inline-block;width:3px;height:11px;vertical-align:-1px;margin-right:8px}
-  .bar{height:3px;background:var(--line);margin-top:4px;width:100%}
-  .bar i{display:block;height:100%;background:var(--pen)}
-  .bar.u i{background:var(--usd)}
-  .cat-n{font-size:12.5px}
-  .day{color:var(--muted);font-size:11.5px;letter-spacing:.04em;white-space:nowrap}
-  .amt.gas{color:var(--text)} .amt.ing{color:var(--up)}
-  .sym{color:var(--dim);font-size:10.5px;margin-right:2px}
-
-  /* ---- estados ---- */
-  .msg{padding:34px 14px;text-align:center;color:var(--muted);font-size:12px;letter-spacing:.08em}
-  .msg .blink{color:var(--amber);animation:bk 1.05s steps(2,start) infinite}
-  @keyframes bk{to{visibility:hidden}}
-  .msg.err{color:var(--down)}
-
-  /* ---- barra de estado ---- */
-  .status{position:sticky;bottom:0;display:flex;flex-wrap:wrap;align-items:center;gap:0;
-          background:var(--topbar);border-top:1px solid var(--line2);
-          font-size:10px;letter-spacing:.1em;color:#8C8C8C}
-  .status span{padding:6px 12px;border-right:1px solid #2A2A2A;white-space:nowrap}
-  .status span:last-child{border-right:0;margin-left:auto;color:#5A5A5A}
-  .status b{color:var(--amber);font-weight:600}
-  .status .dot{color:var(--up)}
-
-  @media (max-width:640px){
-    .ttl{display:none}
-    .tiles{grid-template-columns:1fr}
-    .tile+.tile{border-left:0;border-top:1px solid var(--line)}
-    main{padding:9px}
-    thead th,tbody td{padding-left:8px;padding-right:8px}
+  /* Cabecera con navegación de mes */
+  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 22px; }
+  h1 { font-size: 15px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  h1 a { color: var(--tenue); text-decoration: none; font-weight: 400; font-size: 13px;
+         letter-spacing: 0; text-transform: none; margin-left: 10px; }
+  h1 a:hover { color: var(--tinta); }
+  .nav { display: flex; align-items: center; gap: 10px; }
+  .nav button {
+    background: none; border: 1px solid var(--linea); border-radius: 4px;
+    width: 30px; height: 30px; cursor: pointer; color: var(--tinta); font-size: 14px;
   }
-  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  .nav button:hover { background: var(--tarjeta); }
+  .nav button:focus-visible { outline: 2px solid var(--pen); outline-offset: 2px; }
+  #mes { font-weight: 500; min-width: 130px; text-align: center; text-transform: capitalize; }
+
+  /* Hero: dos monedas lado a lado, sin conversión */
+  .totales {
+    display: grid; grid-template-columns: 1fr 1fr; background: var(--tarjeta);
+    border: 1px solid var(--linea); border-radius: 8px; overflow: hidden; margin-bottom: 26px;
+  }
+  .total { padding: 20px 22px; }
+  .total + .total { border-left: 1px solid var(--linea); }
+  .total .rotulo { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--tenue); }
+  .total .cifra { font-size: 30px; font-weight: 600; margin-top: 6px; }
+  .total.pen .cifra { color: var(--pen); }
+  .total.usd .cifra { color: var(--usd); }
+  .total .ingreso { font-size: 12.5px; color: var(--tenue); margin-top: 4px; }
+
+  h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--tenue);
+       margin: 26px 0 10px; }
+
+  /* Categorías: fila con barra proporcional en PEN */
+  .cat { display: grid; grid-template-columns: 1fr auto; gap: 2px 14px; padding: 9px 2px;
+         border-bottom: 1px solid var(--linea); }
+  .cat .nombre { font-weight: 500; }
+  .cat .montos { text-align: right; font-size: 14px; }
+  .cat .montos .usd-m { color: var(--usd); margin-left: 10px; }
+  .cat .barra { grid-column: 1 / -1; height: 4px; background: var(--linea); border-radius: 2px; }
+  .cat .barra i { display: block; height: 100%; background: var(--pen); border-radius: 2px; }
+
+  /* Movimientos recientes */
+  .mov { display: flex; justify-content: space-between; gap: 12px; padding: 8px 2px;
+         border-bottom: 1px solid var(--linea); font-size: 14px; }
+  .mov .cuando { color: var(--tenue); white-space: nowrap; width: 52px; }
+  .mov .que { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mov .que small { color: var(--tenue); }
+  .mov .cuanto { white-space: nowrap; }
+  .mov .cuanto.ing { color: var(--pen); }
+
+  .estado { color: var(--tenue); padding: 40px 0; text-align: center; }
+  footer { margin-top: 34px; font-size: 12.5px; color: var(--tenue); }
+
+  @media (max-width: 480px) {
+    .totales { grid-template-columns: 1fr; }
+    .total + .total { border-left: 0; border-top: 1px solid var(--linea); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .cat .barra i { transition: width .35s ease; }
+  }
+  .tema{width:32px;height:32px;border:1px solid var(--linea-2);background:var(--tarjeta);
+  color:var(--tenue);border-radius:7px;display:grid;place-items:center;cursor:pointer;padding:0;}
+  .tema:hover{color:var(--tinta);}
+  .tema svg{width:16px;height:16px;display:none;}
+  html[data-theme="dark"] .tema .i-sun{display:block;}
+  html[data-theme="light"] .tema .i-moon{display:block;}
 </style>
 </head>
 <body>
-
-<div class="top">
-  <span class="tag">FIN</span>
-  <span class="ttl">REGISTRO FINANCIERO</span>
-  <nav>
-    <a href="<?= url ?>" aria-current="page"><b>1</b>TABLERO</a>
-    <a href="<?= url ?>?page=analisis"><b>2</b>ANÁLISIS</a>
-    <a href="<?= url ?>?page=movil"><b>3</b>MÓVIL</a>
-    <a href="<?= url ?>?pagina=conciliar"><b>4</b>CONCILIAR</a>
-    <button class="navbtn" id="tema" aria-label="Cambiar tema" title="Cambiar tema">
-      <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+  <header>
+    <h1>Registro financiero<a href="<?= url ?>?pagina=conciliar">Conciliar ›</a><a href="<?= url ?>?page=movil">Móvil ›</a></h1>
+    <div class="nav">
+      <button id="prev" aria-label="Mes anterior">‹</button>
+      <span id="mes" class="num">&nbsp;</span>
+      <button id="next" aria-label="Mes siguiente">›</button>
+    </div>
+    <button class="tema" id="tema" aria-label="Cambiar tema" title="Cambiar tema">
+      <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+       <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+       </svg>
       <svg class="i-moon" viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
     </button>
-  </nav>
-</div>
+  </header>
 
-<div class="per">
-  <span class="lb">PERIODO</span>
-  <button id="prev" aria-label="Mes anterior">‹</button>
-  <span id="mes" class="num">·····</span>
-  <button id="next" aria-label="Mes siguiente">›</button>
-  <span class="spacer"></span>
-  <span class="stamp num" id="stamp"></span>
-</div>
+  <div id="contenido"><p class="estado">Leyendo el libro mayor…</p></div>
 
-<main id="contenido">
-  <p class="msg"><span class="blink">█</span> LEYENDO LIBRO MAYOR…</p>
-</main>
-
-<div class="status" id="status" hidden>
-  <span class="dot">● LIVE</span>
-  <span>MOV <b id="stMov">—</b></span>
-  <span>CONCILIADO <b id="stConc">—</b></span>
-  <span>MONEDA NATIVA · SIN CONVERSIÓN</span>
-  <span id="stTime" class="num"></span>
-</div>
+  <footer id="pie"></footer>
 
 <script>
-/* ================= TEMA (device-first, persistente) ================= */
-var TEMA = (function(){
-  var g = null; try { g = localStorage.getItem('tema'); } catch(e){}
-  if (g === 'light' || g === 'dark') return g;
-  return (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
-})();
-function aplicarTema(t){
-  TEMA = t;
-  document.documentElement.setAttribute('data-theme', t);
-  try { localStorage.setItem('tema', t); } catch(e){}
-}
-aplicarTema(TEMA);
-/* Listener registrado UNA sola vez, fuera de cargar(). */
-document.getElementById('tema').addEventListener('click', function(){
-  aplicarTema(TEMA === 'light' ? 'dark' : 'light');
-});
+  let offset = 0;
 
-/* ================= ESTADO ================= */
-var offset = 0;
-var PREV = null;           // datos del mes anterior, para los deltas
-var SIMB = { PEN:'S/', USD:'US$' };
+  const fmt = (n) => n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-var CAT_COLOR = {
-  'Alimentación':'#FFA028','Restaurantes/Delivery':'#F0883E','Transporte':'#35A7DB',
-  'Hogar':'#A371F7','Servicios/Suscripciones':'#4C8EDA','Salud':'#DB61A2',
-  'Entretenimiento':'#E3B341','Compras':'#39C5BB','Retiros efectivo':'#8B949E',
-  'Educación':'#3FB950','Otros':'#7D8590','sin_categoria':'#5A5A5A'
-};
-function catColor(c){ return CAT_COLOR[c] || '#7D8590'; }
-function catLabel(c){ return c === 'sin_categoria' ? 'SIN CATEGORÍA' : c; }
-
-function fmt(n){
-  return n.toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2});
-}
-function esc(s){
-  return String(s).replace(/[&<>"']/g, function(c){
-    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
-  });
-}
-function reloj(){
-  var d = new Date(), p = function(x){ return String(x).padStart(2,'0'); };
-  return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
-}
-
-/* ================= CARGA ================= */
-/* Dos llamadas al MISMO backend existente: mes actual + mes previo (para Δ).
-   No requiere ningún cambio en obtenerDatosTablero(). */
-function cargar(){
-  document.getElementById('contenido').innerHTML =
-    '<p class="msg"><span class="blink">█</span> LEYENDO LIBRO MAYOR…</p>';
-  document.getElementById('status').hidden = true;
-
-  google.script.run
-    .withSuccessHandler(function(prev){ PREV = prev; pedirActual(); })
-    .withFailureHandler(function(){ PREV = null; pedirActual(); })
-    .obtenerDatosTablero(offset - 1);
-}
-function pedirActual(){
-  google.script.run
-    .withSuccessHandler(pintar)
-    .withFailureHandler(function(e){
-      document.getElementById('contenido').innerHTML =
-        '<p class="msg err">ERROR DE LECTURA · ' + esc(e && e.message ? e.message : e) + '</p>';
-    })
-    .obtenerDatosTablero(offset);
-}
-
-/* ================= RENDER ================= */
-function delta(actual, previo, invertir){
-  if (previo == null || !(previo > 0)) return '<span class="dlt nil">—</span>';
-  var p = (actual - previo) / previo * 100;
-  if (Math.abs(p) < 0.05) return '<span class="dlt nil">0.0%</span>';
-  /* invertir=true para GASTOS: subir es malo (rojo), bajar es bueno (verde). */
-  var bueno = invertir ? p < 0 : p > 0;
-  return '<span class="dlt ' + (bueno ? 'pos' : 'neg') + '">' +
-         (p > 0 ? '▲' : '▼') + ' ' + Math.abs(p).toFixed(1) + '%</span>';
-}
-
-function tile(cur, d){
-  var g = d.gastos[cur], i = d.ingresos[cur], neto = i - g;
-  var pg = PREV ? PREV.gastos[cur] : null;
-  var pi = PREV ? PREV.ingresos[cur] : null;
-  return '<div class="tile ' + cur.toLowerCase() + '">' +
-    '<div class="cur"><i>' + SIMB[cur] + '</i> &nbsp;' + cur + '</div>' +
-    '<div class="big num">' + fmt(g) + '</div>' +
-    '<div class="lbl">GASTO DEL PERIODO &nbsp; ' + delta(g, pg, true) + '</div>' +
-    '<div class="rows">' +
-      '<div class="r"><span>INGRESOS</span><span class="num">' + fmt(i) +
-        ' &nbsp;' + delta(i, pi, false) + '</span></div>' +
-      '<div class="r"><span>NETO</span><span class="num net ' +
-        (neto >= 0 ? 'pos' : 'neg') + '">' + (neto >= 0 ? '+' : '−') +
-        fmt(Math.abs(neto)) + '</span></div>' +
-    '</div></div>';
-}
-
-function pintar(d){
-  document.getElementById('mes').textContent = d.etiquetaMes;
-  document.getElementById('next').disabled = d.offset >= 0;
-  document.getElementById('stamp').textContent = 'T' + (d.offset === 0 ? '0' : d.offset);
-
-  if (d.totalMovimientos === 0){
-    document.getElementById('contenido').innerHTML =
-      '<p class="msg">SIN MOVIMIENTOS EN ' + esc(d.etiquetaMes).toUpperCase() + '</p>';
-    document.getElementById('status').hidden = true;
-    return;
+  function cargar() {
+    document.getElementById('contenido').innerHTML = '<p class="estado">Leyendo el libro mayor…</p>';
+    google.script.run
+      .withSuccessHandler(pintar)
+      .withFailureHandler(e => {
+        document.getElementById('contenido').innerHTML =
+          '<p class="estado">No se pudo leer el Sheet: ' + e.message + '. Recarga la página.</p>';
+      })
+      .obtenerDatosTablero(offset);
   }
 
-  var h = '';
+  function pintar(d) {
+    document.getElementById('mes').textContent = d.etiquetaMes;
+    document.getElementById('next').disabled = d.offset >= 0;
 
-  /* --- resumen de monedas --- */
-  h += '<section class="pnl"><div class="pnl-h"><span>RESUMEN · MONEDA NATIVA</span>' +
-       '<span class="r">Δ VS. PERIODO ANTERIOR</span></div>' +
-       '<div class="pnl-b tiles">' + tile('PEN', d) + tile('USD', d) + '</div></section>';
+    if (d.totalMovimientos === 0) {
+      document.getElementById('contenido').innerHTML =
+        '<p class="estado">Sin movimientos en ' + d.etiquetaMes + '.</p>';
+      document.getElementById('pie').textContent = '';
+      return;
+    }
 
-  /* --- categorías --- */
-  var maxPEN = 1;
-  d.categorias.forEach(function(c){ if (c.PEN > maxPEN) maxPEN = c.PEN; });
-  var maxUSD = 1;
-  d.categorias.forEach(function(c){ if (c.USD > maxUSD) maxUSD = c.USD; });
+    let html = '<div class="totales">' +
+      bloqueTotal('pen', 'Gastos S/', d.gastos.PEN, d.ingresos.PEN, 'S/') +
+      bloqueTotal('usd', 'Gastos US$', d.gastos.USD, d.ingresos.USD, 'US$') +
+      '</div>';
 
-  h += '<section class="pnl"><div class="pnl-h"><span>GASTO POR CATEGORÍA</span>' +
-       '<span class="r">' + d.categorias.length + ' RUBROS</span></div><div class="pnl-b">' +
-       '<table><thead><tr><th>CATEGORÍA</th><th class="r">PEN</th><th class="r">USD</th></tr></thead><tbody>';
-  d.categorias.forEach(function(c){
-    var anchoP = (c.PEN / maxPEN * 100).toFixed(1);
-    var anchoU = (c.USD / maxUSD * 100).toFixed(1);
-    h += '<tr><td class="trunc">' +
-      '<span class="swatch" style="background:' + catColor(c.nombre) + '"></span>' +
-      '<span class="cat-n">' + esc(catLabel(c.nombre)) + '</span>' +
-      '<span class="bar"><i style="width:' + (c.PEN > 0 ? anchoP : 0) + '%"></i></span></td>' +
-      '<td class="r num">' + (c.PEN > 0 ? '<span class="sym">S/</span>' + fmt(c.PEN) : '<span class="sym">·</span>') + '</td>' +
-      '<td class="r num">' + (c.USD > 0 ? '<span class="sym">US$</span>' + fmt(c.USD) : '<span class="sym">·</span>') + '</td></tr>';
+    html += '<h2>Por categoría</h2>';
+    const maxPEN = Math.max(1, ...d.categorias.map(c => c.PEN));
+    d.categorias.forEach(c => {
+      html += '<div class="cat"><span class="nombre">' + esc(c.nombre) + '</span>' +
+        '<span class="montos num">' +
+        (c.PEN > 0 ? 'S/ ' + fmt(c.PEN) : '') +
+        (c.USD > 0 ? '<span class="usd-m">US$ ' + fmt(c.USD) + '</span>' : '') +
+        '</span>' +
+        '<span class="barra"><i style="width:' + (c.PEN / maxPEN * 100).toFixed(1) + '%"></i></span>' +
+        '</div>';
+    });
+
+    html += '<h2>Últimos movimientos</h2>';
+    d.recientes.forEach(m => {
+      const signo = m.tipo === 'ingreso' ? '+' : '−';
+      html += '<div class="mov">' +
+        '<span class="cuando num">' + m.dia + '</span>' +
+        '<span class="que">' + esc(m.comercio) + ' <small>· ' + esc(m.categoria) + '</small></span>' +
+        '<span class="cuanto num' + (m.tipo === 'ingreso' ? ' ing' : '') + '">' +
+        signo + ' ' + (m.moneda === 'PEN' ? 'S/' : 'US$') + ' ' + fmt(m.monto) + '</span>' +
+        '</div>';
+    });
+
+    document.getElementById('contenido').innerHTML = html;
+    let pie = d.totalMovimientos + ' movimientos en ' + d.etiquetaMes +
+      ' · montos en moneda nativa, sin conversión';
+    if (d.conciliacion && d.conciliacion.pct !== null) {
+      pie += ' · conciliado ' + d.conciliacion.pct + '% (' +
+        d.conciliacion.conciliados + '/' + d.conciliacion.conciliables + ')';
+    }
+    document.getElementById('pie').textContent = pie;
+  }
+
+  function bloqueTotal(clase, rotulo, gasto, ingreso, simbolo) {
+    return '<div class="total ' + clase + '">' +
+      '<div class="rotulo">' + rotulo + '</div>' +
+      '<div class="cifra num">' + simbolo + ' ' + fmt(gasto) + '</div>' +
+      (ingreso > 0 ? '<div class="ingreso num">ingresos + ' + simbolo + ' ' + fmt(ingreso) + '</div>' : '') +
+      '</div>';
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  }
+
+  /* Tema: el dispositivo decide el arranque y el botón se registra UNA sola vez.
+     Antes ambas cosas vivían dentro de cargar(), así que cada navegación de mes
+     acumulaba un listener (tras N meses, un clic alternaba N+1 veces) y volvía
+     a pisar la elección manual con la preferencia del sistema. */
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches){
+    document.documentElement.setAttribute('data-theme','light');
+  }
+  document.getElementById('tema').addEventListener('click', function(){
+    var cur = document.documentElement.getAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', cur === 'light' ? 'dark' : 'light');
   });
-  h += '</tbody></table></div></section>';
 
-  /* --- blotter de movimientos --- */
-  h += '<section class="pnl"><div class="pnl-h"><span>ÚLTIMOS MOVIMIENTOS</span>' +
-       '<span class="r">' + d.recientes.length + ' DE ' + d.totalMovimientos + '</span></div><div class="pnl-b">' +
-       '<table><thead><tr><th>FECHA</th><th>DESCRIPCIÓN</th><th>CATEGORÍA</th><th class="r">MONTO</th></tr></thead><tbody>';
-  d.recientes.forEach(function(m){
-    var ing = m.tipo === 'ingreso';
-    h += '<tr><td class="day num">' + esc(m.dia).toUpperCase() + '</td>' +
-      '<td class="trunc">' + esc(m.comercio) + '</td>' +
-      '<td class="trunc" style="color:' + catColor(m.categoria) + '">' +
-        esc(catLabel(m.categoria)) + '</td>' +
-      '<td class="r num amt ' + (ing ? 'ing' : 'gas') + '">' + (ing ? '+' : '−') + ' ' +
-        '<span class="sym">' + SIMB[m.moneda] + '</span>' + fmt(m.monto) + '</td></tr>';
-  });
-  h += '</tbody></table></div></section>';
-
-  document.getElementById('contenido').innerHTML = h;
-
-  /* --- barra de estado --- */
-  document.getElementById('stMov').textContent = d.totalMovimientos;
-  var c = d.conciliacion;
-  document.getElementById('stConc').textContent =
-    (c && c.pct !== null) ? c.pct + '% (' + c.conciliados + '/' + c.conciliables + ')' : 'N/D';
-  document.getElementById('stTime').textContent = reloj();
-  document.getElementById('status').hidden = false;
-}
-
-document.getElementById('prev').onclick = function(){ offset--; cargar(); };
-document.getElementById('next').onclick = function(){ if (offset < 0){ offset++; cargar(); } };
-cargar();
+  document.getElementById('prev').onclick = () => { offset--; cargar(); };
+  document.getElementById('next').onclick = () => { if (offset < 0) { offset++; cargar(); } };
+  cargar();
 </script>
 </body>
 </html>
