@@ -393,8 +393,22 @@ function interpretarCorreoBCPCrudo_(msg) {
   const sistema =
     'Eres un extractor de datos de correos del banco BCP (Perú). ' +
     'Recibes UN correo y devuelves SOLO un objeto JSON, sin prosa ni markdown.\n\n' +
-    'Esquema exacto:\n' +
-    '{\n' +
+    'Esquema exacto:\n' + esquemaBCP_() + '\n' + reglasExtraccionBCP_();
+
+  return llamarDeepSeekJson_(sistema, entrada);
+}
+
+/**
+ * Esquema y reglas del extractor, en UN solo lugar.
+ *
+ * El prompt individual y el de lote tienen que decir exactamente lo mismo: si
+ * divergen, el backfill clasificaría distinto que la corrida horaria y el
+ * registro quedaría inconsistente según por dónde entró cada movimiento. Ya
+ * pasó hoy con el simulacro, que llamaba al conversor sin el asunto y mostraba
+ * un resultado que la corrida real no producía.
+ */
+function esquemaBCP_() {
+  return '{\n' +
     '  "es_movimiento": true|false,\n' +
     '  "tipo": "gasto"|"ingreso"|"traspaso",\n' +
     '  "monto": number,\n' +
@@ -405,8 +419,13 @@ function interpretarCorreoBCPCrudo_(msg) {
     '  "ultimos4": string,\n' +
     '  "num_operacion": string,\n' +
     '  "confianza": "alta"|"media"|"baja"\n' +
-    '}\n\n' +
-    'Reglas:\n' +
+    '}';
+}
+
+/** Las reglas de dominio del extractor. Compartidas por el prompt individual
+ *  y el de lote — ver el comentario de `esquemaBCP_()`. */
+function reglasExtraccionBCP_() {
+  return 'Reglas:\n' +
     '- es_movimiento=false si el correo NO registra dinero que entró o salió: ' +
     'claves temporales, promociones, avisos de seguridad, avisos de que tu ' +
     'estado de cuenta está disponible, cambios de datos. En ese caso los demás ' +
@@ -453,8 +472,59 @@ function interpretarCorreoBCPCrudo_(msg) {
     '- "confianza": "baja" si no estás seguro del monto, la fecha o el tipo. ' +
     'Preferimos que un correo quede marcado para revisión a que entre un dato ' +
     'equivocado al registro financiero. No adivines.';
+}
 
-  return llamarDeepSeekJson_(sistema, entrada);
+// ========================= INTERPRETACIÓN EN LOTE =========================
+//
+// Para el backfill del histórico: una llamada por correo son cientos de
+// llamadas. Agrupando bajan a decenas. La corrida horaria sigue usando el
+// camino individual porque casi nunca tiene más de un correo pendiente.
+
+/** Correos por llamada. Con 1800 caracteres cada uno son ~15k por petición. */
+const LOTE_TAMANO_ = 8;
+const MAX_CHARS_LLM_LOTE_ = 1800;
+
+/**
+ * Interpreta varios correos en UNA llamada.
+ * Devuelve un arreglo alineado con `msgs`: cada posición trae el objeto crudo
+ * del LLM, o null si no vino respuesta para ese correo.
+ *
+ * El índice `i` viaja en la petición y se exige de vuelta: sin él, si el modelo
+ * devuelve menos elementos o los reordena, los datos se pegarían al correo
+ * equivocado — un monto atribuido a otra operación. Se empareja por `i`, nunca
+ * por posición en el arreglo de respuesta.
+ */
+function interpretarLoteBCP_(msgs) {
+  const entrada = msgs.map(function (msg, i) {
+    let cuerpo = sanearParaLLM_(msg.getBody());
+    if (cuerpo.length > MAX_CHARS_LLM_LOTE_) cuerpo = cuerpo.slice(0, MAX_CHARS_LLM_LOTE_);
+    return { i: i, asunto: msg.getSubject(), cuerpo: cuerpo };
+  });
+
+  const sistema =
+    'Eres un extractor de datos de correos del banco BCP (Perú). ' +
+    'Recibes VARIOS correos en un arreglo, cada uno con su índice "i". ' +
+    'Devuelves SOLO un objeto JSON, sin prosa ni markdown, con esta forma:\n' +
+    '{"correos":[{"i":<el MISMO i que recibiste>, ...campos...}]}\n\n' +
+    'Devuelve un elemento por cada correo recibido, sin omitir ninguno, y copia ' +
+    '"i" exactamente como vino: es lo que permite saber a qué correo pertenece ' +
+    'cada resultado. No reordenes ni agrupes.\n\n' +
+    'Campos de cada elemento (además de "i"):\n' + esquemaBCP_() + '\n' +
+    reglasExtraccionBCP_();
+
+  const respuesta = llamarDeepSeekJson_(sistema, JSON.stringify(entrada));
+  const lista = respuesta.correos || [];
+
+  const salida = msgs.map(function () { return null; });
+  lista.forEach(function (o) {
+    const i = Number(o.i);
+    if (!isFinite(i) || i < 0 || i >= msgs.length) {
+      Logger.log('El LLM devolvió un índice fuera de rango: ' + JSON.stringify(o.i));
+      return;
+    }
+    salida[i] = o;
+  });
+  return salida;
 }
 
 // ================= RECONOCIMIENTO DEL TITULAR =================
