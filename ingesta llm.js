@@ -51,12 +51,49 @@ const LABEL_NO_MOVIMIENTO = 'no_movimiento';
  */
 const INGESTA_LLM_DESDE_ = '2026/07/22';
 
-const BUSQUEDA_BCP_AMPLIA =
+/**
+ * DOS BÚSQUEDAS, y la razón importa.
+ *
+ * Las etiquetas de Gmail son por HILO, pero nosotros procesamos por MENSAJE.
+ * Cuando llega un correo del BCP con el mismo asunto que otro anterior, Gmail
+ * lo mete en el hilo existente — que ya está etiquetado `procesado`. Una
+ * búsqueda con `-label:procesado` descarta el hilo entero y ese correo nuevo
+ * NUNCA se lee, pero aparece etiquetado como procesado. Ese fue el bug: correos
+ * marcados como procesados que jamás llegaron a la hoja.
+ *
+ * 1. ATRASO: excluye por etiqueta. Sirve para drenar hilos que nunca se han
+ *    tocado sin releerlos cada hora.
+ * 2. RECIENTE: ignora las etiquetas por completo dentro de una ventana corta.
+ *    Es la que atrapa los mensajes nuevos colgados de un hilo ya etiquetado.
+ *
+ * La deduplicación real NO son las etiquetas: es el `ID Mensaje` en la hoja
+ * (regla 3) más la hoja de ignorados. Las etiquetas son solo para que tú veas
+ * el estado en Gmail y para acotar la búsqueda.
+ */
+const BUSQUEDA_BCP_ATRASO =
   'from:notificacionesbcp.com.pe' +
   ' after:' + INGESTA_LLM_DESDE_ +
   ' -label:' + LABEL_PROCESADO +
   ' -label:' + LABEL_ERROR +
   ' -label:' + LABEL_NO_MOVIMIENTO;
+
+/** Días hacia atrás que se re-barren sin mirar etiquetas. */
+const VENTANA_RECIENTE_DIAS_ = 3;
+
+const BUSQUEDA_BCP_RECIENTE =
+  'from:notificacionesbcp.com.pe newer_than:' + VENTANA_RECIENTE_DIAS_ + 'd';
+
+/**
+ * Correos que ya se evaluaron y NO deben volver a consultarse al LLM: los que
+ * no son movimientos y los que fallaron. Antes esto lo hacía la etiqueta del
+ * hilo, que como se explicó arriba arrastraba mensajes ajenos.
+ *
+ * Vive en una hoja y no en una etiqueta porque es por mensaje, y de paso queda
+ * más visible que un label (regla 5: cero pérdidas silenciosas). Para reintentar
+ * un correo, borra su fila y espera la siguiente corrida.
+ */
+const HOJA_IGNORADOS = 'Correos Ignorados';
+const ENCABEZADOS_IGNORADOS = ['ID Mensaje', 'Fecha', 'Asunto', 'Motivo', 'Detalle'];
 
 /** Recorte del cuerpo antes de mandarlo. Los correos del BCP son cortos; 2500
  *  caracteres cubren de sobra el bloque de datos de la operación. */
@@ -96,10 +133,22 @@ function ingestarBCPAmplia() {
     const labelErr = obtenerOCrearLabel_(LABEL_ERROR);
     const labelNoMov = obtenerOCrearLabel_(LABEL_NO_MOVIMIENTO);
 
+    const hojaIgn = hojaIgnorados_(ss);
     const idsExistentes = cargarIdsExistentes_(hoja);
+    const ignorados = cargarIgnorados_(hojaIgn);
     const mapeo = cargarMapeoCategorias_(ss);
 
-    const hilos = GmailApp.search(BUSQUEDA_BCP_AMPLIA, 0, 50);
+    // Unión de las dos búsquedas, sin repetir hilos.
+    const hilos = [], vistos = {};
+    GmailApp.search(BUSQUEDA_BCP_ATRASO, 0, 50)
+      .concat(GmailApp.search(BUSQUEDA_BCP_RECIENTE, 0, 50))
+      .forEach(function (h) {
+        const id = h.getId();
+        if (vistos[id]) return;
+        vistos[id] = true;
+        hilos.push(h);
+      });
+
     let porParser = 0, porLLM = 0, noMov = 0, dup = 0, err = 0;
 
     hilos.forEach(function (hilo) {
@@ -107,7 +156,9 @@ function ingestarBCPAmplia() {
 
       hilo.getMessages().forEach(function (msg) {
         const id = msg.getId();
+        // Doble filtro por MENSAJE, no por hilo: ya registrado, o ya descartado.
         if (idsExistentes.has(id)) { dup++; return; }
+        if (ignorados.has(id)) { dup++; return; }
 
         let mov = null, viaLLM = false;
 
@@ -123,12 +174,16 @@ function ingestarBCPAmplia() {
           try {
             const interpretado = interpretarCorreoBCP_(msg);
             if (!interpretado) {          // el LLM dice: esto no es un movimiento
+              registrarIgnorado_(hojaIgn, msg, 'no_movimiento', '');
+              ignorados.add(id);
               conNoMov = true; noMov++;
               return;
             }
             mov = interpretado;
             viaLLM = true;
           } catch (e) {
+            registrarIgnorado_(hojaIgn, msg, 'error_parseo', e.message);
+            ignorados.add(id);
             conError = true; err++;
             Logger.log('error_parseo (LLM) en ' + id + ': ' + e.message);
             return;
@@ -152,22 +207,64 @@ function ingestarBCPAmplia() {
           conMovimiento = true;
           if (viaLLM) porLLM++; else porParser++;
         } catch (e) {
+          registrarIgnorado_(hojaIgn, msg, 'error_parseo', e.message);
+          ignorados.add(id);
           conError = true; err++;
           Logger.log('validación falló en ' + id + ': ' + e.message);
         }
       });
 
-      // Precedencia de etiquetas: un error tapa todo lo demás (queda visible).
+      // Las escrituras al Sheet van en buffer; las llamadas a Gmail no. Sin
+      // este flush, un corte por tiempo entre ambas dejaría el hilo etiquetado
+      // y la fila perdida.
+      if (conMovimiento || conNoMov || conError) SpreadsheetApp.flush();
+
+      // Las etiquetas son informativas: marcan el hilo, no el mensaje, así que
+      // ya no se usan para decidir qué procesar. Un error tapa lo demás.
       if (conError) hilo.addLabel(labelErr);
       else if (conMovimiento) hilo.addLabel(labelOk);
       else if (conNoMov) hilo.addLabel(labelNoMov);
     });
 
     Logger.log('Corrida ampliada BCP → parser: ' + porParser + ' · LLM: ' + porLLM +
-      ' · no-movimiento: ' + noMov + ' · duplicados: ' + dup + ' · errores: ' + err);
+      ' · no-movimiento: ' + noMov + ' · ya registrados: ' + dup + ' · errores: ' + err);
   } finally {
     lock.releaseLock();
   }
+}
+
+// ================= HOJA DE CORREOS IGNORADOS =================
+
+/** Devuelve la hoja de ignorados, creándola con encabezados si no existe. */
+function hojaIgnorados_(ss) {
+  let hoja = ss.getSheetByName(HOJA_IGNORADOS);
+  if (!hoja) {
+    hoja = ss.insertSheet(HOJA_IGNORADOS);
+    hoja.getRange(1, 1, 1, ENCABEZADOS_IGNORADOS.length)
+        .setValues([ENCABEZADOS_IGNORADOS])
+        .setFontWeight('bold');
+    hoja.getRange('A:A').setNumberFormat('@');  // los IDs son texto
+    hoja.setFrozenRows(1);
+  }
+  return hoja;
+}
+
+/** IDs de mensaje ya evaluados y descartados. */
+function cargarIgnorados_(hoja) {
+  const n = hoja.getLastRow();
+  const set = new Set();
+  if (n < 2) return set;
+  hoja.getRange(2, 1, n - 1, 1).getValues().forEach(function (f) {
+    if (f[0]) set.add(String(f[0]));
+  });
+  return set;
+}
+
+function registrarIgnorado_(hoja, msg, motivo, detalle) {
+  hoja.appendRow([
+    msg.getId(), msg.getDate(), msg.getSubject(), motivo,
+    String(detalle || '').slice(0, 500)
+  ]);
 }
 
 // ========================= INTERPRETACIÓN CON DEEPSEEK =========================
@@ -452,6 +549,48 @@ function llamarDeepSeekJson_(sistema, usuario) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj))
     throw new Error('Respuesta no es un objeto JSON.');
   return obj;
+}
+
+// ========================= DIAGNÓSTICO =========================
+
+/**
+ * Lista los correos del BCP que NO están en la hoja ni en los ignorados,
+ * mostrando qué etiqueta tienen. Es el que revela el problema de las etiquetas
+ * por hilo: un correo con etiqueta `procesado` que nunca llegó al registro.
+ *
+ * Solo lectura: no escribe, no etiqueta y no llama al LLM.
+ */
+function diagnosticarCorreosSinRegistrar() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const idsExistentes = cargarIdsExistentes_(ss.getSheetByName(HOJA_MOVIMIENTOS));
+  const ignorados = cargarIgnorados_(hojaIgnorados_(ss));
+  const tz = Session.getScriptTimeZone();
+
+  const hilos = GmailApp.search(
+    'from:notificacionesbcp.com.pe after:' + INGESTA_LLM_DESDE_, 0, 100);
+
+  let total = 0, huerfanos = 0;
+  Logger.log('=== Correos del BCP desde ' + INGESTA_LLM_DESDE_ + ' ===');
+
+  hilos.forEach(function (hilo) {
+    const etiquetas = hilo.getLabels().map(function (l) { return l.getName(); }).join(',') || '(sin etiqueta)';
+    hilo.getMessages().forEach(function (msg) {
+      total++;
+      const id = msg.getId();
+      if (idsExistentes.has(id) || ignorados.has(id)) return;
+      huerfanos++;
+      Logger.log('SIN REGISTRAR · ' + Utilities.formatDate(msg.getDate(), tz, 'yyyy-MM-dd HH:mm') +
+        ' · etiquetas: ' + etiquetas + ' · ' + msg.getSubject().slice(0, 60));
+    });
+  });
+
+  Logger.log('');
+  Logger.log('Total de correos revisados: ' + total);
+  Logger.log('Sin registrar: ' + huerfanos);
+  if (huerfanos > 0) {
+    Logger.log('Los de los últimos ' + VENTANA_RECIENTE_DIAS_ + ' días los recoge sola la ' +
+      'próxima corrida. Para los más viejos, sube VENTANA_RECIENTE_DIAS_ una vez.');
+  }
 }
 
 // ========================= SIMULACRO =========================

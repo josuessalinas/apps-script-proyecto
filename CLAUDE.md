@@ -137,6 +137,18 @@ como modificado es la señal de alarma.
    Correr cualquier función mil veces no debe duplicar ni una fila. Si agregas
    una fuente nueva, diséñale su llave antes de escribir código.
 
+   **Las etiquetas de Gmail NO sirven para decidir qué procesar.** Son por
+   *hilo*, y nosotros procesamos por *mensaje*: cuando el BCP manda un correo
+   con un asunto repetido, Gmail lo cuelga del hilo existente, que ya está
+   etiquetado `procesado`. Una búsqueda con `-label:procesado` descarta el hilo
+   entero y ese correo nuevo no se lee nunca, pero se ve etiquetado como
+   procesado. Pasó el 2026-07-22.
+
+   Lo que deduplica es el `ID Mensaje` en la hoja, más la hoja
+   `Correos Ignorados` para los que ya se evaluaron y se descartaron. Las
+   etiquetas quedaron solo para que se vea el estado en Gmail y para acotar la
+   búsqueda de atraso; por eso hay además un barrido reciente que las ignora.
+
 4. **El registro es el activo.** Ante la duda, prioriza no perder ni corromper
    datos por encima de cualquier otra cosa. Por eso `corridaHoraria()` envuelve
    la categorización en `try/catch`: si el LLM falla, la ingesta ya quedó a
