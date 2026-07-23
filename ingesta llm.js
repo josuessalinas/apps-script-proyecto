@@ -44,12 +44,18 @@
 const LABEL_NO_MOVIMIENTO = 'no_movimiento';
 
 /**
- * Piso de fecha: "empezando desde ahora". Sin esto, la primera corrida ampliada
- * se tragaría TODO el histórico de correos no-consumo del BCP, que nunca fueron
- * etiquetados, en una sola pasada de llamadas al LLM.
- * Formato Gmail: yyyy/MM/dd. Bajarlo es la forma de hacer backfill a propósito.
+ * Piso de fecha de la búsqueda ATRASO (la red de recuperación por si el trigger
+ * estuvo caído). Estuvo en '2026/07/22' para que la primera corrida ampliada no
+ * se tragara TODO el histórico de una vez, antes de tener el backfill.
+ *
+ * El backfill del histórico ya está corrido (2025-01 → 2026-07, ver backfill
+ * llm.js), así que se bajó a '2026/07/01': suficiente solape con lo ya
+ * registrado —que se salta por ID Mensaje— sin re-escanear el histórico cada
+ * hora. No conviene bajarlo hasta 2025: el backfill no etiqueta los hilos, así
+ * que un piso muy bajo haría que ATRASO arrastre hilos viejos ya registrados en
+ * cada corrida. Formato Gmail: yyyy/MM/dd.
  */
-const INGESTA_LLM_DESDE_ = '2026/07/22';
+const INGESTA_LLM_DESDE_ = '2026/07/01';
 
 /**
  * DOS BÚSQUEDAS, y la razón importa.
