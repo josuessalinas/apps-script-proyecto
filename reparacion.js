@@ -298,3 +298,75 @@ function fechaDeIso_(s) {
   const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
 }
+
+// ============ 4. RECLASIFICAR LOS "INGRESOS" DEL BBVA COMO TRASPASO ============
+//
+// El titular confirmó que TODO ingreso del estado de cuenta del BBVA fue una
+// transferencia desde su propia cuenta BCP: el mismo dinero moviéndose entre
+// cuentas propias, o pagos a su tarjeta. Por la regla 1 eso es un `traspaso`, no
+// un `ingreso`. Contarlo como ingreso lo suma a los totales dos veces —una al
+// salir del BCP, otra al entrar al BBVA—: el doble conteo que el sistema existe
+// para evitar. Se cambian a `traspaso` y su categoría a 'Traspaso' (así
+// categorizarPendientes() tampoco les gasta una llamada al LLM).
+//
+// No hace falta identificar filas a mano: el criterio es determinista
+// —Fuente=estado_cuenta, Banco=BBVA, Tipo=ingreso—. Los `gasto` del BBVA (las
+// compras reales) no se tocan.
+
+/** Muestra qué reclasificaría. No escribe. */
+function simularReclasificarIngresosBBVA() {
+  reclasificarIngresosBBVA_(false);
+}
+
+/** Cambia esos ingresos del BBVA a traspaso. Corre el simulacro antes. */
+function aplicarReclasificarIngresosBBVA() {
+  reclasificarIngresosBBVA_(true);
+}
+
+function reclasificarIngresosBBVA_(escribir) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) { Logger.log('Otra corrida en curso. Salgo.'); return; }
+
+  try {
+    const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MOVIMIENTOS);
+    const n = hoja.getLastRow();
+    if (n < 2) { Logger.log('La hoja está vacía.'); return; }
+
+    const filas = hoja.getRange(2, 1, n - 1, 14).getValues();
+    const tz = Session.getScriptTimeZone();
+    const objetivo = [];
+
+    filas.forEach(function (f, i) {
+      if (String(f[11]) !== 'estado_cuenta') return;  // L = Fuente
+      if (String(f[8]) !== 'BBVA') return;            // I = Banco
+      if (String(f[2]) !== 'ingreso') return;         // C = Tipo
+      objetivo.push({ fila: i + 2, f: f });
+    });
+
+    let sumaPEN = 0, sumaUSD = 0;
+    objetivo.forEach(function (o) {
+      const fecha = (o.f[1] instanceof Date) ? Utilities.formatDate(o.f[1], tz, 'yyyy-MM-dd') : '????-??-??';
+      const esPEN = String(o.f[4]) === 'PEN';
+      if (esPEN) sumaPEN += Number(o.f[3]); else sumaUSD += Number(o.f[3]);
+      Logger.log('Fila ' + pad_(o.fila, 4) + ' · ' + fecha + ' · ' +
+        pad_((esPEN ? 'S/' : 'US$') + ' ' + Number(o.f[3]).toFixed(2), 12) + ' · ' +
+        String(o.f[5]).slice(0, 40) + '  ingreso → traspaso');
+    });
+
+    if (escribir) {
+      objetivo.forEach(function (o) {
+        hoja.getRange(o.fila, 3).setValue('traspaso');   // C = Tipo
+        hoja.getRange(o.fila, 7).setValue('Traspaso');   // G = Categoría
+      });
+    }
+
+    Logger.log('');
+    Logger.log('Dejarían de contar como ingreso: S/ ' + sumaPEN.toFixed(2) +
+      ' y US$ ' + sumaUSD.toFixed(2));
+    Logger.log(escribir
+      ? '=== APLICADO: ' + objetivo.length + ' filas reclasificadas a traspaso. ==='
+      : '=== SIMULACRO: ' + objetivo.length + ' filas se reclasificarían. Nada se escribió. ===');
+  } finally {
+    lock.releaseLock();
+  }
+}
