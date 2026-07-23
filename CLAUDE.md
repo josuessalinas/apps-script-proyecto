@@ -278,49 +278,120 @@ manejan el registro financiero real de una persona.
 
 Discutidas con el usuario, aún sin hacer:
 
+## ⏸ RETOMAR AQUÍ — sesión del 2026-07-22
+
+El backfill del histórico quedó **construido, probado en frío y sin correr**.
+Nada de lo que sigue está hecho a medias en el registro: la hoja está sana.
+
+**Paso 1 — verificar los consumos con tarjeta de crédito (bloqueante).**
+Son 66 correos del histórico que `parseBCP_` procesará, apoyados en un
+comentario de `ingesta inicial bcp.js:174` que admite que el caso crédito es
+*"PROVISIONAL hasta traer un correo real de crédito"*. Nunca se verificó. Hay
+que exportar el correo de ejemplo `19f7b28165262d17` (guardarlo con un nombre
+terminado en `-BCP.html`, que el `.gitignore` ya excluye) y comprobar el parser
+contra él, como se hizo con `parseTransferenciaBCP_`. Si el parser falla,
+entran 66 filas malas de golpe.
+
+**Paso 2 — backfill de prueba, un solo mes.** Poner
+`BACKFILL_AMPLIO_DESDE_ = '2026-06'` en `backfill llm.js`, correr
+`backfillBCPAmplio()` una vez y revisar en la hoja cómo quedaron esas filas.
+
+**Paso 3 — backfill completo.** Si el mes de prueba se ve bien: poner
+`'2025-01'`, correr `reiniciarBackfillAmplio()` y repetir `backfillBCPAmplio()`
+hasta que el log diga `TERMINADO`. Costo medido: ~21 llamadas al LLM para 19
+meses, porque ~532 correos los resuelve un parser y ~59 se descartan por asunto.
+
+**Paso 4 — bajar `INGESTA_LLM_DESDE_`** (hoy `2026/07/22`) para que la corrida
+horaria deje de ignorar lo anterior. Después del backfill ya no hay riesgo de
+avalancha: lo viejo estará registrado y se salta por `ID Mensaje`.
+
+Decidido y ya implementado en esta sesión, no volver a discutirlo:
+- El **wardadito** es el bolsillo de ahorro propio: aportes y retiros son
+  `traspaso` en ambos sentidos.
+- **Retiro** de efectivo en cajero o agente es `gasto`; **depósito** en cajero
+  es `traspaso`. Asimetría deliberada: el efectivo no se rastrea después.
+- `Se rechazó tu compra` **no es un movimiento** y se descarta por asunto, no
+  se le pregunta al LLM: una compra rechazada no ocurrió.
+
+Sin verificar todavía, ser escéptico:
+- El prompt de conciliación con `traspaso` **nunca se ejercitó contra un PDF
+  real**, ni la detección de banco.
+- Formatos de correo nunca vistos: Yape enviado y recibido, pago de servicio,
+  retiro en agente, y **cualquier movimiento en USD**.
+- `ultimos4` es inestable cuando viene del LLM (ver regla 6).
+
+---
+
+## Mejoras pendientes, por prioridad
+
 **1. Cobertura de ingesta — ~~el hueco más grande~~ hecho para el BCP
-(2026-07-22).** `ingestarBCPAmplia()` en `ingesta llm.js` ya cubre todo correo
-del BCP, no solo `subject:consumo`. Verificado en simulacro contra 5 correos
-reales: consumo, pago de tarjeta propia, transferencia a otro banco y depósito
-en cajero.
+(2026-07-22).** `ingestarBCPAmplia()` en `ingesta llm.js` cubre todo correo del
+BCP, no solo `subject:consumo`, con la cadena parser determinista → descarte por
+asunto → DeepSeek. Verificado en simulacro contra 5 correos reales y contra los
+44 asuntos distintos que devolvió `inventarioCorreosBCP()`.
 
 Lo que queda de este punto:
-- **Otros bancos e Yape/Plin fuera del BCP** siguen sin cubrirse. Un banco
-  nuevo necesita su propia búsqueda de Gmail; el resto del flujo (parser →
-  LLM → validación determinista) se reutiliza tal cual.
-- `INGESTA_LLM_DESDE_` es un piso de fecha para que la primera corrida no se
-  tragara el histórico. Bajarlo es la forma de hacer backfill a propósito, y
-  cuesta una llamada al LLM por cada correo no-consumo.
-- Solo se probó contra 5 correos. Formatos que todavía no se han visto: Yape,
-  Plin, débito automático, retiro de cajero y cualquier cosa en USD. Revisa el
-  Log de las primeras corridas reales antes de confiarte.
+- **Otros bancos** siguen sin ingesta por correo. El BBVA solo existe si se sube
+  su PDF. Un banco nuevo necesita su propia búsqueda de Gmail; el resto del flujo
+  se reutiliza tal cual.
+- **Más parsers deterministas.** Cada formato que deja de ir al LLM es una
+  llamada que no se paga nunca más. Por volumen convienen: retiro en cajero
+  (34), retiro de wardadito (31), pago de tarjeta propia (29), aporte a
+  wardadito (13), pago de servicio (13), retiro en agente (10) — 130 correos.
+  Hace falta un correo de muestra de cada uno. **Nunca escribir un parser a
+  ciegas**: sin muestra, que lo haga el LLM.
 
-**2. Presupuestos por categoría.** Hoy el sistema registra pero no gobierna. Una
+**2. Reparación pendiente de correr (`reparacion.js`).** El usuario ya corrigió
+a mano la columna `Banco` de las filas del BBVA, pero quedaron dos cosas sin
+hacer. Nada de esto se ha ejecutado todavía:
+
+- `simular/aplicarNormalizarLlaves()` — esas filas conservan la llave en
+  formato viejo `estado_cuenta|fecha|monto|moneda|n`, sin el banco. Volver a
+  subir ese PDF del BBVA **insertaría todo duplicado**: la compatibilidad hacia
+  atrás de `cruzarItems_` solo cubre el BCP. Es mecánico, no hay que
+  identificar filas.
+- `simular/aplicarResetConciliado()` — durante la corrida con el banco fijo en
+  BCP, cualquier movimiento del BCP que coincidiera en moneda, monto y fecha
+  ±3 días con una transacción del BBVA quedó `Conciliado = TRUE` sin respaldo.
+  No hay forma de distinguir cuáles. La salida limpia es desmarcar el período y
+  volver a subir el estado del BCP. `Conciliado` es dato derivado: se regenera.
+
+`reparacion.js` es de un solo uso; se borra cuando esto quede hecho.
+
+**3. `ultimos4` inestable desde el LLM — decisión pendiente.** Para el mismo
+correo, DeepSeek devolvió `9055` y `4555` en dos corridas, pese a
+`temperature: 0`: son las cuentas origen y destino, y elige una arbitrariamente.
+`parseTransferenciaBCP_` confirmó que la correcta es la origen (`9055`).
+Propuesta sin aprobar: dejar el campo vacío cuando el movimiento venga por LLM
+en una transferencia, porque un número plausible pero falso es peor que un campo
+vacío. No afecta la conciliación, que cruza por moneda + monto + fecha.
+
+**4. Presupuestos por categoría.** Hoy el sistema registra pero no gobierna. Una
 hoja `Presupuestos` y una columna de varianza lo volverían una herramienta de
 decisión.
 
-**3. Saldos de cuentas.** Se registran flujos, no saldos. El sistema no puede
+**5. Saldos de cuentas.** Se registran flujos, no saldos. El sistema no puede
 responder "¿cuánto tengo?".
 
-**4. Escrituras por lote.** `cruzarItems_` y el backfill hacen `appendRow()` y
+**6. Escrituras por lote.** `cruzarItems_` y el backfill hacen `appendRow()` y
 `setValue()` dentro de bucles: una llamada a la API de Sheets por fila. Agrupar
 en `setValues()` sería órdenes de magnitud más rápido y aliviaría el límite de
 6 minutos.
 
-**5. `categorizar_` depende del orden de la hoja.** Gana el primer patrón que
+**7. `categorizar_` depende del orden de la hoja.** Gana el primer patrón que
 haga `indexOf`, así que uno corto y genérico se come a los específicos. Debería
 ordenar por longitud de patrón descendente.
 
-**6. Sin pruebas.** `parseBCP_` y el emparejador de `cruzarItems_` merecen tests
+**8. Sin pruebas.** `parseBCP_` y el emparejador de `cruzarItems_` merecen tests
 con correos y estados de ejemplo.
 
-**7. Sin bitácora.** No hay rastro de qué corrida insertó o categorizó qué.
+**9. Sin bitácora.** No hay rastro de qué corrida insertó o categorizó qué.
 
-**8. Configuración incrustada.** `BACKFILL_DESDE_`, `BACKFILL_HASTA_` y
+**10. Configuración incrustada.** `BACKFILL_DESDE_`, `BACKFILL_HASTA_` y
 `FECHA_INICIO_RECURRENTES` obligan a editar código y redesplegar para cada
 trimestre. Deberían vivir en Script Properties o en una hoja `Config`.
 
-**9. `obtenerDatosAnalisis()` manda la hoja entera al navegador** en cada carga.
+**11. `obtenerDatosAnalisis()` manda la hoja entera al navegador** en cada carga.
 A unos miles de filas va bien; más allá conviene agregar en el servidor y cachear.
 
 ---
