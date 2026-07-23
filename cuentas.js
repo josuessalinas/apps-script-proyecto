@@ -588,3 +588,94 @@ function obtenerSaldos() {
 
   return { corte: FECHA_CORTE_CUENTAS, monedas: monedas, cuentas: lista };
 }
+
+// ========================= SALDO DE APERTURA (cuadrar el registro) =========================
+//
+// `analisis.html` suma ingresos − gastos de TODO el histórico, pero al registro
+// le falta el punto de partida: lo que ya tenías antes de la primera fila. Sin
+// eso, el balance del análisis no coincide con tu saldo real.
+//
+// Esto agrega UNA línea de "Saldo de apertura" por moneda —un supuesto que
+// engloba todo lo previo y no mapeado— para que el balance del registro aterrice
+// en tu saldo real de la hoja `Cuentas`. Es idempotente (llave `apertura|{moneda}`).
+//
+// A qué cuadrar: 'liquido' (lo que tienes) o 'patrimonio' (líquido − deuda).
+
+const AJUSTE_OBJETIVO_ = 'liquido';   // 'liquido' o 'patrimonio'
+
+/** Muestra el ajuste que haría falta por moneda. No escribe. */
+function simularSaldoApertura() { saldoApertura_(false); }
+
+/** Escribe la línea de apertura por moneda. Corre el simulacro antes. */
+function aplicarSaldoApertura() { saldoApertura_(true); }
+
+function saldoApertura_(escribir) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) { Logger.log('Otra corrida en curso. Salgo.'); return; }
+
+  try {
+    const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MOVIMIENTOS);
+    const cuentas = cargarCuentas_();
+    if (!cuentas) { Logger.log('No hay hoja "' + HOJA_CUENTAS + '". Corre configurarCuentas().'); return; }
+
+    const idsExistentes = cargarIdsExistentes_(hoja);
+    const n = hoja.getLastRow();
+    const filas = (n > 1) ? hoja.getRange(2, 1, n - 1, 14).getValues() : [];
+
+    // Net de flujos por moneda (traspasos excluidos) + fecha más antigua.
+    const net = {}; let minFecha = null;
+    filas.forEach(function (f) {
+      const tipo = String(f[2]).trim(), moneda = String(f[4]).trim(), monto = Number(f[3]) || 0, fecha = f[1];
+      if (fecha instanceof Date && (!minFecha || fecha < minFecha)) minFecha = fecha;
+      if (tipo === 'traspaso') return;
+      if (!net[moneda]) net[moneda] = { ing: 0, gas: 0 };
+      if (tipo === 'ingreso') net[moneda].ing += monto;
+      else if (tipo === 'gasto') net[moneda].gas += monto;
+    });
+
+    // Objetivos reales por moneda desde la hoja Cuentas.
+    const obj = {};
+    Object.keys(cuentas).forEach(function (nm) {
+      const c = cuentas[nm], m = c.moneda;
+      if (!obj[m]) obj[m] = { liquido: 0, bloqueado: 0, deuda: 0 };
+      if (c.tipo === 'activo') obj[m].liquido += c.saldo;
+      else if (c.tipo === 'activo_bloqueado') obj[m].bloqueado += c.saldo;
+      else if (c.tipo === 'deuda') obj[m].deuda += c.saldo;
+    });
+
+    const fechaApertura = minFecha ? new Date(minFecha.getTime() - 86400000) : new Date();
+
+    Logger.log('=== Saldo de apertura (objetivo: ' + AJUSTE_OBJETIVO_ + ') ===');
+    Object.keys(net).forEach(function (m) {
+      const balance = +(net[m].ing - net[m].gas).toFixed(2);
+      const o = obj[m] || { liquido: 0, bloqueado: 0, deuda: 0 };
+      const patrimonio = +(o.liquido + o.bloqueado - o.deuda).toFixed(2);
+      const objetivo = (AJUSTE_OBJETIVO_ === 'patrimonio') ? patrimonio : +o.liquido.toFixed(2);
+      const ajuste = +(objetivo - balance).toFixed(2);
+      const simbolo = (m === 'PEN') ? 'S/' : (m === 'USD') ? 'US$' : m;
+
+      Logger.log('· ' + m + ': ingresos ' + simbolo + ' ' + net[m].ing.toFixed(2) +
+        ' − gastos ' + simbolo + ' ' + net[m].gas.toFixed(2) + ' = balance ' + simbolo + ' ' + balance.toFixed(2));
+      Logger.log('     líquido ' + simbolo + ' ' + o.liquido.toFixed(2) +
+        ' · patrimonio ' + simbolo + ' ' + patrimonio.toFixed(2));
+      Logger.log('     → APERTURA: ' + (ajuste >= 0 ? '+' : '') + simbolo + ' ' + ajuste.toFixed(2) +
+        ' como ' + (ajuste >= 0 ? 'ingreso' : 'gasto'));
+
+      if (escribir && Math.abs(ajuste) >= 0.01) {
+        const llave = 'apertura|' + m;
+        if (idsExistentes.has(llave)) { Logger.log('     ya existe, no se duplica.'); return; }
+        escribirMovimiento_(hoja, {
+          idMensaje: llave, fecha: fechaApertura,
+          tipo: ajuste >= 0 ? 'ingreso' : 'gasto', monto: Math.abs(ajuste), moneda: m,
+          comercio: 'Saldo de apertura y ajustes previos (supuesto)',
+          categoria: 'Saldo de apertura', metodo: 'ajuste', banco: '',
+          ultimos4: '', numOperacion: '', fuente: 'ajuste', referencia: ''
+        });
+      }
+    });
+
+    Logger.log(escribir ? '=== APLICADO ===' : '=== SIMULACRO: nada se escribió. ===');
+  } finally {
+    lock.releaseLock();
+  }
+}
