@@ -93,8 +93,9 @@ como modificado es la señal de alarma.
 | `reparacion.js` | De un solo uso: arregla las filas que quedaron con el banco equivocado. Todo viene en pareja `simular…` / `aplicar…`. Borrable una vez usado. |
 | `recurrentes.js` | Materializa ingresos fijos (sueldo, etc.) por mes, de forma idempotente. |
 | `backfill.js` | Carga histórica de correos y de recurrentes. Se auto-detiene a los ~4.5 min por el corte de 6 min de Apps Script. |
-| `tablero backend.js` | `doGet()` (enrutador de las 5 vistas) y `obtenerDatosTablero()`. |
+| `tablero backend.js` | `doGet()` (enrutador de las 6 vistas) y `obtenerDatosTablero()`. |
 | `visualizer.js` | Solo `obtenerDatosAnalisis()`, que alimenta `analisis.html` y `movil.html`. |
+| `registro backend.js` | `registrarMovimientoManual()`: alta manual de un movimiento desde `registro.html`. Re-valida en servidor y escribe con `fuente='manual'` y llave `manual\|{sello}\|{rand}`. **Se llama `registro backend.js`, no `registro.js`**: Apps Script no admite un script y un HTML con el mismo nombre base (`registro.html`) — clasp avisa "A file with this name already exists". |
 | `cuentas.js` | **Saldos por cuenta.** Hoja `Cuentas` (saldo real por bolsillo al corte), `cuentaDeMovimiento_()` (atribuye cada movimiento a su cuenta), `calcularSaldos()`/`obtenerSaldos()` (saldo vivo = inicial + flujos posteriores al corte), el **redondeo automático** al ahorro (`materializar/aplicarRedondeos`, enganchado en `corridaHoraria`), y el **saldo de apertura** (`simular/aplicarSaldoApertura`) que cuadra el registro con la realidad. `inventarioMovimientos()`/`diagnosticoAtribucion()` son de solo lectura. |
 
 ### Frontend (`.html`)
@@ -102,10 +103,16 @@ como modificado es la señal de alarma.
 | Archivo | Ruta | Llama a |
 |---|---|---|
 | `tablero.html` | por defecto | `obtenerDatosTablero(offset)` |
+| `registro.html` | `?page=registro` | `registrarMovimientoManual(datos)` |
 | `analisis.html` | `?page=analisis` | `obtenerDatosAnalisis()` |
 | `saldos.html` | `?page=saldos` | `obtenerSaldos()` |
 | `movil.html` | `?page=movil` | `obtenerDatosAnalisis()` |
 | `conciliar.html` | `?pagina=conciliar` | `conciliarTextoEstado(texto, etiqueta)` |
+
+Las **seis vistas comparten el sistema de diseño de análisis** (Space Grotesk +
+Inter, fondo oscuro, acento violeta/celeste), salvo el detalle de que `movil.html`
+mantiene su layout móvil. Un `.html` nuevo se registra en el enrutador de `doGet`
+y **su nombre base no puede coincidir con el de un `.js`** (ver `registro`).
 
 ---
 
