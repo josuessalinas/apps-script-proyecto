@@ -278,34 +278,51 @@ manejan el registro financiero real de una persona.
 
 Discutidas con el usuario, aún sin hacer:
 
-## ⏸ RETOMAR AQUÍ — sesión del 2026-07-22
+## ✅ Backfill y reparación BBVA — HECHOS (sesión del 2026-07-23)
 
-El backfill del histórico quedó **construido, probado en frío y sin correr**.
-Nada de lo que sigue está hecho a medias en el registro: la hoja está sana.
+Toda la tanda que estaba pendiente se ejecutó y quedó verificada:
 
-**Paso 1 — verificar los consumos con tarjeta de crédito (bloqueante).**
-Son 66 correos del histórico que `parseBCP_` procesará, apoyados en un
-comentario de `ingesta inicial bcp.js:174` que admite que el caso crédito es
-*"PROVISIONAL hasta traer un correo real de crédito"*. Nunca se verificó. Hay
-que exportar el correo de ejemplo `19f7b28165262d17` (guardarlo con un nombre
-terminado en `-BCP.html`, que el `.gitignore` ya excluye) y comprobar el parser
-contra él, como se hizo con `parseTransferenciaBCP_`. Si el parser falla,
-entran 66 filas malas de golpe.
+- **Parser de crédito verificado.** Se exportó `modelo-consumo-tccredito-BCP.html`
+  y `parseBCP_` lo lee bien (metodo=tarjeta_credito, ultimos4, etc.). Ya no es
+  "PROVISIONAL" (ver `ingesta inicial bcp.js` línea del comentario de crédito).
+- **Backfill completo corrido:** `backfillBCPAmplio()` cargó 2025-01 → 2026-07 y
+  dijo `TERMINADO`, sin errores salvo 2 correos de 2025-05 (ver abajo).
+- **`INGESTA_LLM_DESDE_` bajado a `2026/07/01`** (ya no ignora lo reciente).
+- **Reparación BBVA aplicada** (ver detalle en pendiente 2, ya tachado).
 
-**Paso 2 — backfill de prueba, un solo mes.** Poner
-`BACKFILL_AMPLIO_DESDE_ = '2026-06'` en `backfill llm.js`, correr
-`backfillBCPAmplio()` una vez y revisar en la hoja cómo quedaron esas filas.
+### ⏸ RETOMAR AQUÍ — cabos sueltos y el nuevo objetivo (2026-07-23)
 
-**Paso 3 — backfill completo.** Si el mes de prueba se ve bien: poner
-`'2025-01'`, correr `reiniciarBackfillAmplio()` y repetir `backfillBCPAmplio()`
-hasta que el log diga `TERMINADO`. Costo medido: ~21 llamadas al LLM para 19
-meses, porque ~532 correos los resuelve un parser y ~59 se descartan por asunto.
+**A. Regenerar conciliados del BCP (pendiente de PDFs).** `aplicarResetConciliado()`
+desmarcó 22 movimientos del BCP (rango 2026-02 a 2026-07). Hay que **volver a
+subir los estados de cuenta del BCP** de ese lapso en `?pagina=conciliar` para
+que el cruce —ya con el banco bien detectado— re-marque los legítimos. El usuario
+**no los tiene a la mano**; los solicitará por correo (el BCP los manda, hasta 2
+años atrás). Los que no tengan PDF quedan sin conciliar, que es lo correcto.
 
-**Paso 4 — bajar `INGESTA_LLM_DESDE_`** (hoy `2026/07/22`) para que la corrida
-horaria deje de ignorar lo anterior. Después del backfill ya no hay riesgo de
-avalancha: lo viejo estará registrado y se salta por `ID Mensaje`.
+**B. 2 correos en `error_parseo` de 2025-05.** Un lote del backfill falló con
+"Respuesta no es un objeto JSON" (DeepSeek devolvió no-JSON). Están en
+`Correos Ignorados`, no perdidos, pero **no se reintentan solos** (salen como "ya
+estaban"). Para recuperarlos: borrar esas 2 filas de `Correos Ignorados`,
+`reiniciarBackfillAmplio()` y `backfillBCPAmplio()`.
 
-Decidido y ya implementado en esta sesión, no volver a discutirlo:
+**C. NUEVO OBJETIVO — cuadrar cuentas por SALDOS, no por flujos** (pendiente 5).
+El usuario quiere saltarse por ahora los vacíos de conciliación y saber
+**cuánto tiene** en cada cuenta: ahorros (wardadito), efectivo, tarjetas (BBVA,
+BCP), etc. Hoy el sistema solo registra flujos. Plan de alto nivel acordado:
+1. Elegir una **fecha de corte** ("cuenta nueva") y anotar el **saldo real** de
+   cada cuenta a esa fecha como saldo inicial.
+2. Hoja `Saldos`/`Cuentas`: cuenta, moneda, saldo inicial, fecha de corte.
+3. Vista/función que calcule saldo actual = inicial + flujos desde el corte
+   (gasto resta, ingreso suma, traspaso mueve entre cuentas). OJO: un traspaso
+   toca DOS cuentas; cada lado ya se registra en su propia fila con su `Banco`,
+   así que el balance por cuenta sale de sumar las filas de esa cuenta.
+
+**D. Futuro — auto-conciliación desde correo.** El BCP (y el BBVA) mandan los
+estados de cuenta por email. Idea del usuario: automatizar que se ingesten esos
+PDF adjuntos desde Gmail y se concilien solos, en vez de subirlos a mano. Encaja
+con "otros bancos por correo" del pendiente 1.
+
+Decidido y ya implementado, no volver a discutirlo:
 - El **wardadito** es el bolsillo de ahorro propio: aportes y retiros son
   `traspaso` en ambos sentidos.
 - **Retiro** de efectivo en cajero o agente es `gasto`; **depósito** en cajero
@@ -341,22 +358,28 @@ Lo que queda de este punto:
   Hace falta un correo de muestra de cada uno. **Nunca escribir un parser a
   ciegas**: sin muestra, que lo haga el LLM.
 
-**2. Reparación pendiente de correr (`reparacion.js`).** El usuario ya corrigió
-a mano la columna `Banco` de las filas del BBVA, pero quedaron dos cosas sin
-hacer. Nada de esto se ha ejecutado todavía:
+**2. ~~Reparación del episodio BBVA~~ HECHA (2026-07-23).** Todo `reparacion.js`
+se ejecutó (siempre `simular` → revisar → `aplicar`):
 
-- `simular/aplicarNormalizarLlaves()` — esas filas conservan la llave en
-  formato viejo `estado_cuenta|fecha|monto|moneda|n`, sin el banco. Volver a
-  subir ese PDF del BBVA **insertaría todo duplicado**: la compatibilidad hacia
-  atrás de `cruzarItems_` solo cubre el BCP. Es mecánico, no hay que
-  identificar filas.
-- `simular/aplicarResetConciliado()` — durante la corrida con el banco fijo en
-  BCP, cualquier movimiento del BCP que coincidiera en moneda, monto y fecha
-  ±3 días con una transacción del BBVA quedó `Conciliado = TRUE` sin respaldo.
-  No hay forma de distinguir cuáles. La salida limpia es desmarcar el período y
-  volver a subir el estado del BCP. `Conciliado` es dato derivado: se regenera.
+- **`aplicarNormalizarLlaves()`** — 56 llaves de estado de cuenta reescritas al
+  formato con banco (`estado_cuenta|BANCO|fecha|monto|moneda|n`). Volver a subir
+  el PDF del BBVA ya no duplica.
+- **`aplicarResetConciliado()`** — 22 movimientos del BCP desmarcados (rango
+  ampliado a `2026-02-01`..`2026-07-31`, porque el estado del BBVA abarcaba de
+  feb a jul). Falta re-subir los PDF del BCP para re-marcar los legítimos (cabo
+  suelto A arriba).
+- **`aplicar/simularReclasificarIngresosBBVA()`** (función nueva agregada esta
+  sesión) — 23 filas del BBVA que estaban como `ingreso` pasaron a `traspaso`:
+  eran transferencias desde el BCP del propio titular (dinero entre cuentas
+  propias, regla 1), no ingresos. Se sacaron S/ 1744.08 + US$ 0.99 de ingresos
+  falsos. **Excepción:** 3 filas eran devoluciones (`N C SALDO ACREEDOR`,
+  `MP MM`) y el usuario las dejó a mano como `ingreso`, no `traspaso`, para que
+  cancelen contra la compra original. El lado BCP de las transferencias ya
+  estaba como `traspaso` (confirmado por el usuario): sin doble conteo.
 
-`reparacion.js` es de un solo uso; se borra cuando esto quede hecho.
+`reparacion.js` es de un solo uso. Se puede borrar cuando se cierre el cabo A
+(re-subir PDFs del BCP); hasta entonces conviene tenerlo por si hay que repetir
+algún reset.
 
 **3. `ultimos4` inestable desde el LLM — decisión pendiente.** Para el mismo
 correo, DeepSeek devolvió `9055` y `4555` en dos corridas, pese a
