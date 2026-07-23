@@ -90,7 +90,8 @@ como modificado es la señal de alarma.
 | `ingesta llm.js` | **Ingesta ampliada.** `ingestarBCPAmplia()` lee *todos* los correos del BCP. Cada uno pasa primero por `parseBCP_()`; solo si falla, el cuerpo saneado va a DeepSeek. Aquí viven las redes deterministas que corrigen al LLM: `REGLAS_TIPO_POR_ASUNTO_`, `esMismoTitular_`. `probarIngestaLLM()` es el simulacro. |
 | `categorizacion.js` | Categoriza con DeepSeek en lote, cacheando en la hoja `Mapeo de Categorías`. Aquí vive `corridaHoraria()` (ingesta → categorización) y el `instalarTriggerHorario()` bueno. |
 | `conciliacion.js` | Recibe el texto del PDF ya extraído en el navegador, lo pasa por DeepSeek y cruza contra `Movimientos` **del mismo banco** por moneda + monto + fecha ±3 días. `detectarBanco_()` identifica el banco contando apariciones en el texto; si no hay ganador claro, exige elegirlo a mano. **Nunca asumas un banco por defecto** — tenerlo fijo en `'BCP'` hizo que un estado del BBVA se registrara como BCP. |
-| `reparacion.js` | De un solo uso: arregla las filas que quedaron con el banco equivocado. Todo viene en pareja `simular…` / `aplicar…`. Borrable una vez usado. |
+| `reparacion.js` | Arreglo de datos ya escritos. La reparación del episodio BBVA (banco, llaves, conciliados) ya se corrió (2026-07-23); quedó también `reclasificarIngresosBBVA_`. Todo viene en pareja `simular…` / `aplicar…`. |
+| `duplicados.js` | **Misma transacción, dos correos.** A veces el banco notifica dos veces una compra (autorización + captura, o dos procesadores: Uber → `DLC*UBER RIDES` y `PYU*UBER`): mensajes distintos, así que la dedup por `ID Mensaje` no los caza. `detectar`/`simular`/`aplicarEliminarDuplicados()` los halla por huella económica (moneda+monto+tipo+banco+método dentro de `VENTANA_DUP_MIN_`) y al quitarlos los registra en `Correos Ignorados` para que no se reinserten. Nunca borra sin simular. |
 | `recurrentes.js` | Materializa ingresos fijos (sueldo, etc.) por mes, de forma idempotente. |
 | `backfill.js` | Carga histórica de correos y de recurrentes. Se auto-detiene a los ~4.5 min por el corte de 6 min de Apps Script. |
 | `tablero backend.js` | `doGet()` (enrutador de las 6 vistas) y `obtenerDatosTablero()`. |
@@ -229,16 +230,20 @@ y **su nombre base no puede coincidir con el de un `.js`** (ver `registro`).
 - **Se intentó un rediseño estilo Bloomberg Terminal (ámbar sobre negro,
   monoespaciada, alta densidad) y fue rechazado.** No lo reintentes sin que te
   lo pidan.
-- **`tablero.html`, `analisis.html` y `saldos.html` comparten un mismo sistema
-  de diseño** (2026-07-23): **Space Grotesk + Inter**, fondo oscuro (`#0A0E17`),
-  acento **violeta para PEN y celeste para USD**, tarjetas redondeadas, KPIs con
-  tick de color, gráficos ECharts. Antes el tablero usaba IBM Plex azul/naranja
-  (`#131722`); se migró a pedido del usuario para unificar. `conciliar.html`
-  sigue con el look viejo (IBM Plex / `#131722`). `movil.html` tiene su propia
-  identidad, más terrosa (verde salvia + azul).
-- La paleta de categorías (`CAT_COLOR`) está duplicada en `tablero.html`,
-  `analisis.html` (y la categoría `Gastos no especificados` es gris `#475569`).
-- **Las cuatro vistas respetan el tema claro/oscuro del dispositivo**, con botón
+- **Las SEIS vistas comparten un mismo sistema de diseño** (unificado el
+  2026-07-23): `tablero.html`, `registro.html`, `analisis.html`, `saldos.html`,
+  `conciliar.html` y `movil.html`. Es **Space Grotesk + Inter**, fondo oscuro
+  (`#0A0E17`), acento **violeta para PEN y celeste para USD**, tarjetas
+  redondeadas, KPIs con tick de color, gráficos ECharts. Antes tablero/conciliar
+  usaban IBM Plex azul/naranja (`#131722`) y móvil su paleta terrosa; se migraron
+  todos a pedido del usuario. `movil.html` conserva su **layout** móvil (una
+  columna, toggle de moneda) pero con la paleta nueva; su JS lee la paleta del
+  CSS, así que basta cambiar las variables `--pen`/`--usd`/etc.
+- La paleta de categorías está **duplicada** en `tablero.html`, `analisis.html` y
+  `movil.html` (`CAT_COLOR` / `CAT_LIGHT`+`CAT_DARK`); la categoría
+  `Gastos no especificados` es gris `#475569`. Deuda conocida: convendría un
+  `estilos.html` compartido vía `include()`.
+- **Las seis vistas respetan el tema claro/oscuro del dispositivo**, con botón
   para cambiarlo a mano. En `movil.html` y en las que usan gráficos, la elección
   se guarda en `localStorage` (con `try/catch`: la página corre dentro de un
   iframe).
@@ -321,10 +326,26 @@ estaban"). Para recuperarlos: borrar esas 2 filas de `Correos Ignorados`,
 
 **C. ~~Cuadrar cuentas por SALDOS~~ HECHO (2026-07-23).** Ver pendiente 5, ya
 tachado: `cuentas.js` + `saldos.html` + redondeo automático + saldo de apertura.
-Lo único que queda del cuadre es que el titular corra `aplicarSaldoApertura()`
-una vez (el simulacro dio: PEN −S/ 10 190.14, USD +US$ 62.54, objetivo `liquido`).
+El titular **ya corrió `aplicarSaldoApertura()`** (PEN −S/ 10 190.14, USD
++US$ 62.54, objetivo `liquido`): quedaron las 2 líneas `Gastos/Ingresos no
+especificados`, editables si aparece un movimiento viejo.
 
-**D. Futuro — auto-conciliación desde correo.** El BCP (y el BBVA) mandan los
+**C-bis. Limpiar duplicados de transacción (pendiente de correr).** El usuario
+detectó que el banco a veces notifica la misma compra dos veces (Uber
+`DLC*UBER RIDES` + `PYU*UBER`, retiros de wardadito dobles, etc.). Se construyó
+`duplicados.js` (`detectar`/`simular`/`aplicarEliminarDuplicados`), ventana
+`VENTANA_DUP_MIN_=120`. **Falta que corra `detectarDuplicados()`**, revise la
+lista (cuidado con compras legítimas iguales) y aplique. Después conviene evaluar
+una **prevención** en la ingesta (marcar el segundo correo como posible
+duplicado); aún no hecha.
+
+**D. Registro manual — HECHO (2026-07-23).** `registro.html` (`?page=registro`,
+botón "＋ Registrar" en el tablero) + `registro backend.js`
+(`registrarMovimientoManual`). Para gastos que no llegan por correo. Nota: un
+gasto manual en efectivo hoy se atribuye a *BCP Corriente* en el motor de saldos
+(no hay regla de efectivo en `cuentaDeMovimiento_`); agregarla si hace falta.
+
+**E. Futuro — auto-conciliación desde correo.** El BCP (y el BBVA) mandan los
 estados de cuenta por email. Idea del usuario: automatizar que se ingesten esos
 PDF adjuntos desde Gmail y se concilien solos, en vez de subirlos a mano. Encaja
 con "otros bancos por correo" del pendiente 1.
