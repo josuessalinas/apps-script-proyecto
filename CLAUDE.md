@@ -93,8 +93,9 @@ como modificado es la señal de alarma.
 | `reparacion.js` | De un solo uso: arregla las filas que quedaron con el banco equivocado. Todo viene en pareja `simular…` / `aplicar…`. Borrable una vez usado. |
 | `recurrentes.js` | Materializa ingresos fijos (sueldo, etc.) por mes, de forma idempotente. |
 | `backfill.js` | Carga histórica de correos y de recurrentes. Se auto-detiene a los ~4.5 min por el corte de 6 min de Apps Script. |
-| `tablero backend.js` | `doGet()` (enrutador de las 4 vistas) y `obtenerDatosTablero()`. |
+| `tablero backend.js` | `doGet()` (enrutador de las 5 vistas) y `obtenerDatosTablero()`. |
 | `visualizer.js` | Solo `obtenerDatosAnalisis()`, que alimenta `analisis.html` y `movil.html`. |
+| `cuentas.js` | **Saldos por cuenta.** Hoja `Cuentas` (saldo real por bolsillo al corte), `cuentaDeMovimiento_()` (atribuye cada movimiento a su cuenta), `calcularSaldos()`/`obtenerSaldos()` (saldo vivo = inicial + flujos posteriores al corte), el **redondeo automático** al ahorro (`materializar/aplicarRedondeos`, enganchado en `corridaHoraria`), y el **saldo de apertura** (`simular/aplicarSaldoApertura`) que cuadra el registro con la realidad. `inventarioMovimientos()`/`diagnosticoAtribucion()` son de solo lectura. |
 
 ### Frontend (`.html`)
 
@@ -102,6 +103,7 @@ como modificado es la señal de alarma.
 |---|---|---|
 | `tablero.html` | por defecto | `obtenerDatosTablero(offset)` |
 | `analisis.html` | `?page=analisis` | `obtenerDatosAnalisis()` |
+| `saldos.html` | `?page=saldos` | `obtenerSaldos()` |
 | `movil.html` | `?page=movil` | `obtenerDatosAnalisis()` |
 | `conciliar.html` | `?pagina=conciliar` | `conciliarTextoEstado(texto, etiqueta)` |
 
@@ -305,17 +307,10 @@ años atrás). Los que no tengan PDF quedan sin conciliar, que es lo correcto.
 estaban"). Para recuperarlos: borrar esas 2 filas de `Correos Ignorados`,
 `reiniciarBackfillAmplio()` y `backfillBCPAmplio()`.
 
-**C. NUEVO OBJETIVO — cuadrar cuentas por SALDOS, no por flujos** (pendiente 5).
-El usuario quiere saltarse por ahora los vacíos de conciliación y saber
-**cuánto tiene** en cada cuenta: ahorros (wardadito), efectivo, tarjetas (BBVA,
-BCP), etc. Hoy el sistema solo registra flujos. Plan de alto nivel acordado:
-1. Elegir una **fecha de corte** ("cuenta nueva") y anotar el **saldo real** de
-   cada cuenta a esa fecha como saldo inicial.
-2. Hoja `Saldos`/`Cuentas`: cuenta, moneda, saldo inicial, fecha de corte.
-3. Vista/función que calcule saldo actual = inicial + flujos desde el corte
-   (gasto resta, ingreso suma, traspaso mueve entre cuentas). OJO: un traspaso
-   toca DOS cuentas; cada lado ya se registra en su propia fila con su `Banco`,
-   así que el balance por cuenta sale de sumar las filas de esa cuenta.
+**C. ~~Cuadrar cuentas por SALDOS~~ HECHO (2026-07-23).** Ver pendiente 5, ya
+tachado: `cuentas.js` + `saldos.html` + redondeo automático + saldo de apertura.
+Lo único que queda del cuadre es que el titular corra `aplicarSaldoApertura()`
+una vez (el simulacro dio: PEN −S/ 10 190.14, USD +US$ 62.54, objetivo `liquido`).
 
 **D. Futuro — auto-conciliación desde correo.** El BCP (y el BBVA) mandan los
 estados de cuenta por email. Idea del usuario: automatizar que se ingesten esos
@@ -393,8 +388,25 @@ vacío. No afecta la conciliación, que cruza por moneda + monto + fecha.
 hoja `Presupuestos` y una columna de varianza lo volverían una herramienta de
 decisión.
 
-**5. Saldos de cuentas.** Se registran flujos, no saldos. El sistema no puede
-responder "¿cuánto tengo?".
+**5. ~~Saldos de cuentas~~ HECHO (2026-07-23).** `cuentas.js` + `saldos.html`
+(`?page=saldos`) ya responden "¿cuánto tengo?". Modelo "foto de hoy y hacia
+adelante": la hoja `Cuentas` guarda el saldo real por bolsillo al corte
+(`FECHA_CORTE_CUENTAS`), y `cuentaDeMovimiento_()` atribuye cada movimiento
+posterior a su cuenta (débito→BCP Corriente, crédito→deuda de la tarjeta,
+transferencia a sí mismo→BBVA Cuenta Digital, wardadito por descripción, etc.;
+validado con `diagnosticoAtribucion()`, 0 sin atribuir). Extras ya montados:
+- **Redondeo automático** al ahorro: cada compra con débito genera un `traspaso`
+  a `Wardadito Ando` por el vuelto a S/5, hasta la meta (`REDONDEO_META_`).
+  Corre solo dentro de `corridaHoraria`. Configurable en variables.
+- **Saldo de apertura** (`simular/aplicarSaldoApertura`): una línea por moneda,
+  categoría `Gastos/Ingresos no especificados`, que cuadra el balance del
+  registro con el saldo real. Es una **perilla editable**: si luego aparece un
+  movimiento viejo, se edita su monto para contrarrestar; `aplicar` no la
+  sobrescribe si ya existe. `analisis.html` ya conoce la categoría
+  `Gastos no especificados` (gris).
+
+Pendiente menor: las metas/límites viven en la columna `Límite/Meta` de la hoja
+`Cuentas` (migración `actualizarMetasCuentas()`); cambiarlas no necesita deploy.
 
 **6. Escrituras por lote.** `cruzarItems_` y el backfill hacen `appendRow()` y
 `setValue()` dentro de bucles: una llamada a la API de Sheets por fila. Agrupar

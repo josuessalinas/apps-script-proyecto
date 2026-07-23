@@ -667,8 +667,9 @@ function saldoApertura_(escribir) {
         escribirMovimiento_(hoja, {
           idMensaje: llave, fecha: fechaApertura,
           tipo: ajuste >= 0 ? 'ingreso' : 'gasto', monto: Math.abs(ajuste), moneda: m,
-          comercio: 'Saldo de apertura y ajustes previos (supuesto)',
-          categoria: 'Saldo de apertura', metodo: 'ajuste', banco: '',
+          comercio: (ajuste >= 0 ? 'Ingresos' : 'Gastos') + ' no especificados (apertura, editable)',
+          categoria: (ajuste >= 0 ? 'Ingresos no especificados' : 'Gastos no especificados'),
+          metodo: 'ajuste', banco: '',
           ultimos4: '', numOperacion: '', fuente: 'ajuste', referencia: ''
         });
       }
