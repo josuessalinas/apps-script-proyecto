@@ -35,8 +35,11 @@ const BANCO_CORRECTO_ = 'BBVA';
  * Rango a limpiar de falsos "Conciliado". Formato yyyy-MM-dd.
  * Usa el período que cubría el estado de cuenta mal subido.
  */
-const RESET_DESDE_ = '2026-06-01';
-const RESET_HASTA_ = '2026-06-30';
+// Las transacciones del estado del BBVA mal subido van de 2026-02-10 a
+// 2026-07-10, así que los falsos "Conciliado" del BCP pueden caer en todo ese
+// lapso (el cruce usa ±3 días). Se abarca febrero a julio con margen.
+const RESET_DESDE_ = '2026-02-01';
+const RESET_HASTA_ = '2026-07-31';
 
 // ===================== 1. DIAGNÓSTICO (solo lectura) =====================
 
