@@ -222,10 +222,15 @@ como modificado es la señal de alarma.
 - **Se intentó un rediseño estilo Bloomberg Terminal (ámbar sobre negro,
   monoespaciada, alta densidad) y fue rechazado.** No lo reintentes sin que te
   lo pidan.
-- El diseño vigente es el de siempre: **IBM Plex Sans**, tarjetas redondeadas,
-  espaciado amplio. `tablero.html`, `analisis.html` y `conciliar.html` usan
-  fondo azul-grisáceo (`#131722`) con azul TradingView para PEN y naranja para
-  USD. `movil.html` tiene su propia identidad, más terrosa (verde salvia + azul).
+- **`tablero.html`, `analisis.html` y `saldos.html` comparten un mismo sistema
+  de diseño** (2026-07-23): **Space Grotesk + Inter**, fondo oscuro (`#0A0E17`),
+  acento **violeta para PEN y celeste para USD**, tarjetas redondeadas, KPIs con
+  tick de color, gráficos ECharts. Antes el tablero usaba IBM Plex azul/naranja
+  (`#131722`); se migró a pedido del usuario para unificar. `conciliar.html`
+  sigue con el look viejo (IBM Plex / `#131722`). `movil.html` tiene su propia
+  identidad, más terrosa (verde salvia + azul).
+- La paleta de categorías (`CAT_COLOR`) está duplicada en `tablero.html`,
+  `analisis.html` (y la categoría `Gastos no especificados` es gris `#475569`).
 - **Las cuatro vistas respetan el tema claro/oscuro del dispositivo**, con botón
   para cambiarlo a mano. En `movil.html` y en las que usan gráficos, la elección
   se guarda en `localStorage` (con `try/catch`: la página corre dentro de un
