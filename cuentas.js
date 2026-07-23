@@ -127,3 +127,44 @@ function resumenCuentas() {
       (b.liquido + b.bloqueado - b.deuda).toFixed(2) + '  (líquido + bloqueado − deuda)');
   });
 }
+
+/**
+ * INVENTARIO de las combinaciones (Banco · Método · Tipo · Moneda) que existen
+ * en `Movimientos`, con su conteo y una descripción de ejemplo. Solo lee.
+ *
+ * Es el insumo para escribir la atribución de cuentas del motor de saldos SIN
+ * adivinar: cada combinación se mapeará a una cuenta de la hoja `Cuentas`. Correr
+ * esto primero evita inventar reglas para casos que no ocurren o pasar por alto
+ * los que sí.
+ */
+function inventarioMovimientos() {
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MOVIMIENTOS);
+  const n = hoja.getLastRow();
+  if (n < 2) { Logger.log('La hoja "' + HOJA_MOVIMIENTOS + '" está vacía.'); return; }
+
+  const filas = hoja.getRange(2, 1, n - 1, 14).getValues();
+  const grupos = {};
+
+  filas.forEach(function (f) {
+    const tipo   = String(f[2]).trim() || '(vacío)';   // C
+    const moneda = String(f[4]).trim() || '(vacío)';   // E
+    const desc   = String(f[5]).trim();                // F
+    const metodo = String(f[7]).trim() || '(vacío)';   // H
+    const banco  = String(f[8]).trim() || '(vacío)';   // I
+    const clave = banco + ' · ' + metodo + ' · ' + tipo + ' · ' + moneda;
+    if (!grupos[clave]) grupos[clave] = { n: 0, ejemplo: desc };
+    grupos[clave].n++;
+  });
+
+  const ordenadas = Object.keys(grupos).sort(function (a, b) {
+    return grupos[b].n - grupos[a].n;
+  });
+
+  Logger.log('=== Inventario de movimientos: ' + (n - 1) + ' filas ===');
+  Logger.log('Banco · Método · Tipo · Moneda   → conteo · ejemplo');
+  ordenadas.forEach(function (clave) {
+    const g = grupos[clave];
+    Logger.log('  ' + clave + '   → ' + g.n + ' · "' + g.ejemplo.slice(0, 35) + '"');
+  });
+  Logger.log('Total de combinaciones distintas: ' + ordenadas.length);
+}
