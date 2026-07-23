@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
   :root{
     --ink:#0A0E17; --panel:#111827; --elev:#161F33; --line:#243049;
@@ -55,6 +56,7 @@
   .card h2{font-family:"Space Grotesk"; font-size:14px; font-weight:600; margin:0 0 2px; letter-spacing:-.01em}
   .card p.hint{font-size:12px; color:var(--faint); margin:0 0 12px}
   .col-6{grid-column:span 6} .col-12{grid-column:span 12}
+  .chart{width:100%} .h-chart{height:280px}
 
   .row{display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:11px 0; border-bottom:1px solid var(--line)}
   .row:last-child{border-bottom:0}
@@ -155,7 +157,9 @@ applyTheme((window.matchMedia && matchMedia("(prefers-color-scheme: light)").mat
 document.getElementById("themeBtn").addEventListener("click", ()=>{
   const next = document.documentElement.getAttribute("data-theme")==="light" ? "dark" : "light";
   applyTheme(next);
+  if(LAST) renderCharts(LAST);   // re-pinta con los colores del tema
 });
+window.addEventListener("resize", ()=>Object.values(charts).forEach(c=>c.resize()));
 
 /* ---------- overlay ---------- */
 function ov(msg, retry){
@@ -190,18 +194,22 @@ function rowAhorro(c){
 }
 
 function rowCredito(c){
-  if(!c.meta){ // sin límite conocido (ej. deuda USD): solo la deuda
+  if(!c.meta){ // sin límite conocido (ej. deuda USD): solo la deuda, en rojo
     return `<div class="prog"><div class="top"><span class="nm">${esc(c.cuenta)}</span>`+
       `<span class="amt num" style="color:var(--expense)">${fmt(c.moneda,c.saldo)} deuda</span></div></div>`;
   }
+  // La deuda siempre en rojo (soles y dólares); la barra muestra lo que queda libre.
   return `<div class="prog"><div class="top"><span class="nm">${esc(c.cuenta)}</span>`+
-    `<span class="meta num" style="color:var(--income)">${fmt(c.moneda,c.disponible)} libre</span></div>`+
+    `<span class="amt num" style="color:var(--expense)">${fmt(c.moneda,c.saldo)} deuda</span></div>`+
     `<div class="track"><span style="width:${c.pct.toFixed(1)}%;background:var(--income)"></span></div>`+
-    `<div class="top" style="margin-top:7px;margin-bottom:0"><span class="meta">Deuda ${fmt(c.moneda,c.saldo)}</span>`+
+    `<div class="top" style="margin-top:7px;margin-bottom:0"><span class="meta" style="color:var(--income)">${fmt(c.moneda,c.disponible)} libre</span>`+
     `<span class="meta">Línea ${fmt(c.moneda,c.meta)}</span></div></div>`;
 }
 
+let LAST = null;
+
 function render(data){
+  LAST = data;
   document.getElementById("corte").textContent = "al "+data.corte;
 
   const pen = data.monedas.PEN || {liquido:0,bloqueado:0,deuda:0,patrimonio:0};
@@ -219,6 +227,8 @@ function render(data){
   const bloq     = A.filter(c=>c.tipo==="activo_bloqueado");
 
   let html = "";
+  html += `<div class="card col-6"><h2>¿Dónde está tu dinero?</h2><p class="hint">Composición del líquido (PEN)</p><div id="chDonut" class="chart h-chart"></div></div>`;
+  html += `<div class="card col-6"><h2>Saldo por cuenta</h2><p class="hint">Activos y deudas en soles</p><div id="chBar" class="chart h-chart"></div></div>`;
   html += `<div class="card col-6"><h2>Líquido disponible</h2><p class="hint">Lo que puedes usar ya</p>`+
     liquido.map(rowLiquido).join("") + `</div>`;
   html += `<div class="card col-6"><h2>Ahorros · wardaditos</h2><p class="hint">Progreso hacia cada meta</p>`+
@@ -230,10 +240,73 @@ function render(data){
       bloq.map(rowLiquido).join("") + `</div>`;
   }
   document.getElementById("grid").innerHTML = html;
+  renderCharts(data);
 
   document.getElementById("foot").innerHTML =
     "Saldo = saldo inicial declarado al corte + los movimientos posteriores, atribuidos a cada cuenta. "+
     "PEN y USD no se mezclan. Las metas se editan en la hoja <b>Cuentas</b>.";
+}
+
+/* ---------- gráficos ---------- */
+const charts = {};
+function ec(id){ const el=document.getElementById(id); if(!el) return null; if(!charts[id]) charts[id]=echarts.init(el); return charts[id]; }
+function themeColors(){
+  const light = document.documentElement.getAttribute("data-theme")==="light";
+  return light
+    ? {text:"#1B2436",muted:"#5A6A86",line:"#E4EAF5",panel:"#FFFFFF",tip:"rgba(255,255,255,.98)"}
+    : {text:"#E8ECF6",muted:"#8695B0",line:"#243049",panel:"#111827",tip:"rgba(17,24,39,.96)"};
+}
+const ACCT_COLOR = {
+  "Efectivo":"#34D399","BCP Corriente":"#A78BFA","BBVA Cuenta Digital":"#38BDF8",
+  "Wardadito Vivienda":"#FBBF24","Wardadito Ando":"#F59E0B","Wardadito Intereses":"#FCD34D",
+  "BBVA Respaldo BFree":"#94A3B8"
+};
+const colorFor = c => ACCT_COLOR[c.cuenta] || (c.tipo==="deuda" ? "#FB7185" : "#818CF8");
+const sfmt = v => "S/ "+ new Intl.NumberFormat("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);
+
+function renderCharts(data){
+  if(typeof echarts==="undefined") return;
+  const th = themeColors();
+  const tip = {backgroundColor:th.tip,borderColor:th.line,borderWidth:1,
+    textStyle:{color:th.text,fontFamily:"Inter",fontSize:12},extraCssText:"border-radius:10px"};
+
+  // Donut: líquido PEN por cuenta
+  const liq = data.cuentas.filter(c=>c.tipo==="activo" && c.moneda==="PEN");
+  const total = liq.reduce((a,c)=>a+c.saldo,0);
+  const d = ec("chDonut");
+  if(d) d.setOption({
+    tooltip:{...tip, trigger:"item", formatter:p=>`${p.name}<br><b class="num">${sfmt(p.value)}</b> · ${p.percent}%`},
+    series:[{type:"pie", radius:["54%","82%"], center:["50%","52%"], padAngle:2,
+      itemStyle:{borderColor:th.panel,borderWidth:2,borderRadius:4},
+      label:{show:true,position:"center",
+        formatter:()=>`{a|Líquido}\n{b|S/ ${new Intl.NumberFormat("es-PE",{maximumFractionDigits:0}).format(total)}}`,
+        rich:{a:{color:th.muted,fontSize:11,fontFamily:"Inter",padding:[0,0,4,0]},
+              b:{color:th.text,fontSize:18,fontFamily:"Space Grotesk",fontWeight:600}}},
+      labelLine:{show:false}, emphasis:{scale:true,scaleSize:6},
+      data: liq.map(c=>({name:c.cuenta, value:+c.saldo.toFixed(2), itemStyle:{color:colorFor(c)}}))
+    }]
+  }, true);
+
+  // Barras horizontales: saldo PEN por cuenta (activos +, deudas −)
+  const items = data.cuentas.filter(c=>c.moneda==="PEN")
+    .map(c=>({cuenta:c.cuenta, val: c.tipo==="deuda" ? -c.saldo : c.saldo, tipo:c.tipo, ref:c}))
+    .sort((a,b)=>a.val-b.val);
+  const b = ec("chBar");
+  if(b) b.setOption({
+    tooltip:{...tip, trigger:"axis", axisPointer:{type:"shadow"},
+      formatter:p=>{const it=p[0]; return `${it.name}<br><b class="num">${sfmt(Math.abs(it.value))}</b>${it.value<0?" · deuda":""}`;}},
+    grid:{left:6,right:14,top:8,bottom:6,containLabel:true},
+    xAxis:{type:"value", axisLine:{lineStyle:{color:th.line}}, axisTick:{show:false},
+      axisLabel:{color:th.muted,fontFamily:"Inter",fontSize:11,formatter:v=>"S/ "+new Intl.NumberFormat("es-PE",{maximumFractionDigits:0}).format(v)},
+      splitLine:{lineStyle:{color:th.line}}},
+    yAxis:{type:"category", data:items.map(i=>i.cuenta), axisLine:{lineStyle:{color:th.line}}, axisTick:{show:false},
+      axisLabel:{color:th.muted,fontFamily:"Inter",fontSize:11}, splitLine:{show:false}},
+    series:[{type:"bar", barWidth:"60%",
+      data: items.map(i=>({value:+i.val.toFixed(2),
+        itemStyle:{color: i.tipo==="deuda" ? "#FB7185" : (i.tipo==="activo_bloqueado" ? "#94A3B8" : colorFor(i.ref)),
+          borderRadius: i.val<0 ? [5,0,0,5] : [0,5,5,0]}}))
+    }]
+  }, true);
 }
 
 /* ---------- carga ---------- */
