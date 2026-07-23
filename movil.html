@@ -5,87 +5,97 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
 <style>
-  /* Paleta clara: la original de esta vista (verde salvia + azul, papel cálido). */
-  html[data-theme="light"]{
-    --papel:#F2F4F1; --tinta:#1C2321; --tenue:#6B746F; --linea:#D6DBD6;
-    --pen:#1F6E52; --usd:#3D5A80; --clay:#9A4A2E; --tarjeta:#FCFDFC;
-    --onaccent:#fff;
-  }
-  /* Paleta oscura: mismo carácter terroso, con los acentos aclarados para
-     mantener el contraste sobre fondo oscuro. */
+  :root{ --radius:16px; }
+  /* Mismo sistema de diseño que analisis/tablero/saldos. Los nombres de variable
+     (--pen, --usd, --clay, --tinta…) se conservan porque el JS lee la paleta
+     desde el CSS; solo cambian los valores a los de análisis. */
   html[data-theme="dark"]{
-    --papel:#121614; --tinta:#E3E8E4; --tenue:#8B958E; --linea:#2C332E;
-    --pen:#4FA882; --usd:#7BA5CE; --clay:#CE8360; --tarjeta:#1A201C;
-    --onaccent:#10140F;
+    --papel:#0A0E17; --tarjeta:#111827; --elev:#161F33; --linea:#243049;
+    --tinta:#E8ECF6; --tenue:#8695B0; --faint:#5A6684;
+    --pen:#A78BFA; --usd:#38BDF8; --clay:#FB7185; --onaccent:#0A0E17;
+    --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 12px 32px -18px rgba(0,0,0,.8);
   }
-  html[data-cur="PEN"]{ --accent:var(--pen); }
-  html[data-cur="USD"]{ --accent:var(--usd); }
+  html[data-theme="light"]{
+    --papel:#EDF1F8; --tarjeta:#FFFFFF; --elev:#FFFFFF; --linea:#E4EAF5;
+    --tinta:#1B2436; --tenue:#5A6A86; --faint:#9AA6BF;
+    --pen:#A78BFA; --usd:#38BDF8; --clay:#FB7185; --onaccent:#0A0E17;
+    --shadow:0 1px 0 rgba(255,255,255,.7) inset, 0 14px 30px -22px rgba(31,45,74,.38);
+  }
+  html[data-cur="PEN"]{ --accent:var(--pen); --accent-soft:rgba(167,139,250,.14); }
+  html[data-cur="USD"]{ --accent:var(--usd); --accent-soft:rgba(56,189,248,.14); }
   *{box-sizing:border-box;margin:0}
+  html,body{margin:0}
   body{
-    background:var(--papel); color:var(--tinta);
-    font:15px/1.5 'IBM Plex Sans',system-ui,sans-serif;
+    background:
+      radial-gradient(1000px 500px at 80% -10%, rgba(167,139,250,.10), transparent 60%),
+      radial-gradient(800px 450px at -10% 8%, rgba(56,189,248,.06), transparent 55%),
+      var(--papel);
+    color:var(--tinta);
+    font-family:Inter,system-ui,sans-serif;
     -webkit-font-smoothing:antialiased;
     padding:22px 16px calc(46px + env(safe-area-inset-bottom));
     max-width:480px; margin:0 auto;
   }
-  .num{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+  .num{font-family:"Space Grotesk",Inter,sans-serif;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 
   header{margin-bottom:16px;}
   .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
-  h1{font-size:15px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;}
-  .acciones{display:flex;align-items:center;gap:12px;}
-  .volver{color:var(--tenue);text-decoration:none;font-size:13.5px;}
-  .volver:hover{color:var(--tinta);}
+  h1{font-family:"Space Grotesk";font-size:18px;font-weight:600;letter-spacing:-.02em;}
+  .acciones{display:flex;align-items:center;gap:10px;}
+  .volver{color:var(--tenue);text-decoration:none;font-size:13px;border:1px solid var(--linea);
+          border-radius:9px;padding:6px 10px;transition:.18s;}
+  .volver:hover{color:var(--tinta);border-color:var(--accent);}
 
   /* Botón de tema: tamaño explícito del SVG y solo el ícono del tema opuesto. */
-  .tema{width:32px;height:32px;border:1px solid var(--linea);background:var(--tarjeta);
-        color:var(--tenue);border-radius:7px;display:grid;place-items:center;
-        cursor:pointer;padding:0;flex:0 0 auto;}
-  .tema:hover{color:var(--tinta);}
-  .tema:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
-  .tema svg{width:16px;height:16px;display:none;}
+  .tema{width:38px;height:38px;border:1px solid var(--linea);background:var(--tarjeta);
+        color:var(--tenue);border-radius:11px;display:grid;place-items:center;
+        cursor:pointer;padding:0;flex:0 0 auto;transition:.18s;}
+  .tema:hover{color:var(--tinta);border-color:var(--accent);}
+  .tema:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent-soft),0 0 0 1px var(--accent);}
+  .tema svg{width:18px;height:18px;display:none;}
   html[data-theme="dark"] .tema .i-sun{display:block;}
   html[data-theme="light"] .tema .i-moon{display:block;}
 
-  .seg{display:inline-flex;border:1px solid var(--linea);border-radius:6px;overflow:hidden;background:var(--tarjeta);}
+  .seg{display:inline-flex;border:1px solid var(--linea);border-radius:11px;background:var(--tarjeta);padding:3px;gap:2px;}
   .seg button{
     border:0;background:transparent;color:var(--tenue);
-    font:600 12.5px/1 'IBM Plex Sans';letter-spacing:.06em;
-    padding:9px 20px;cursor:pointer;transition:.15s;
+    font-family:"Space Grotesk";font-weight:600;font-size:12.5px;letter-spacing:.02em;
+    padding:8px 18px;border-radius:8px;cursor:pointer;transition:.15s;
   }
-  .seg button+button{border-left:1px solid var(--linea);}
-  .seg button.on{background:var(--accent);color:var(--onaccent);}
+  .seg button.on{background:var(--accent-soft);color:var(--tinta);box-shadow:0 0 0 1px var(--accent) inset;}
 
-  .caja{background:var(--tarjeta);border:1px solid var(--linea);border-radius:8px;padding:16px 16px 14px;margin-top:13px;}
-  .caja h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--tenue);}
-  .caja .sub{font-size:12.5px;color:var(--tenue);margin-top:2px;}
+  .caja{background:linear-gradient(180deg,var(--elev),var(--tarjeta));border:1px solid var(--linea);
+        border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 16px 14px;margin-top:14px;}
+  .caja h2{font-family:"Space Grotesk";font-size:13.5px;font-weight:600;color:var(--tinta);letter-spacing:-.01em;}
+  .caja .sub{font-size:12px;color:var(--faint);margin-top:2px;}
   .caja .hd{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
   .hd .marca{font-size:12px;color:var(--accent);font-weight:600;}
 
   /* Lista de gastos */
   .rows{margin-top:8px;}
-  .row{display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--linea);}
+  .row{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--linea);}
   .row:last-child{border-bottom:0;padding-bottom:2px;}
-  .row .tick{width:3px;align-self:stretch;border-radius:2px;background:var(--catc,var(--linea));flex:0 0 auto;}
+  .row .tick{width:3px;align-self:stretch;min-height:30px;border-radius:2px;background:var(--catc,var(--linea));flex:0 0 auto;}
   .row .m{min-width:0;flex:1;}
   .row .m b{display:block;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .row .m small{color:var(--tenue);font-size:12px;text-transform:capitalize;}
-  .row .amt{font-size:14px;white-space:nowrap;}
+  .row .amt{font-size:14px;white-space:nowrap;font-weight:600;}
 
   .chart{width:100%;}
   #c7{height:188px;} #cDonut{height:236px;} #cPago{height:188px;}
 
-  .leyenda{display:flex;gap:16px;margin-top:6px;font-size:12px;color:var(--tenue);}
+  .leyenda{display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--tenue);}
   .leyenda i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;}
   /* Por CSS y no inline: así siguen al tema sin tener que remontar la leyenda. */
   .leyenda i.lg-gasto{background:var(--clay);}
   .leyenda i.lg-ing{background:var(--pen);}
 
   .vacio{padding:26px 6px;text-align:center;color:var(--tenue);font-size:13px;}
-  footer{margin-top:18px;font-size:12px;color:var(--tenue);text-align:center;line-height:1.5;}
+  footer{margin-top:18px;font-size:12px;color:var(--faint);text-align:center;line-height:1.5;}
 </style>
 </head>
 <body>
@@ -147,23 +157,23 @@ function leerPaleta(){
 }
 var accent = function(){ return S.cur === 'PEN' ? CO.pen : CO.usd; };
 
-/* Dos paletas de categoría: las del tema claro son demasiado oscuras sobre
-   fondo oscuro, así que la variante nocturna las aclara conservando el tono. */
+/* Paleta de categoría alineada con analisis.html/tablero.html (misma en claro y
+   oscuro: los tonos de análisis contrastan bien en ambos fondos). */
 var CAT_LIGHT = {
-  'Alimentación':'#1F6E52','Restaurantes/Delivery':'#9A4A2E','Transporte':'#3D5A80',
-  'Hogar':'#6B8F71','Servicios/Suscripciones':'#B0894F','Salud':'#8E5A7C',
-  'Entretenimiento':'#4E7C8B','Compras':'#C06B4A','Retiros efectivo':'#7A8471',
-  'Educación':'#55738F','Otros':'#9AA39D','sin_categoria':'#C2C8C2'
+  'Alimentación':'#34D399','Restaurantes/Delivery':'#FB923C','Transporte':'#38BDF8',
+  'Hogar':'#A78BFA','Servicios/Suscripciones':'#818CF8','Salud':'#F472B6',
+  'Entretenimiento':'#FBBF24','Compras':'#2DD4BF','Retiros efectivo':'#94A3B8',
+  'Educación':'#4ADE80','Otros':'#64748B','sin_categoria':'#64748B'
 };
 var CAT_DARK = {
-  'Alimentación':'#4FA882','Restaurantes/Delivery':'#CE8360','Transporte':'#7BA5CE',
-  'Hogar':'#93B899','Servicios/Suscripciones':'#D4B075','Salud':'#BC8AA8',
-  'Entretenimiento':'#84AFBC','Compras':'#DB9573','Retiros efectivo':'#A6AF9D',
-  'Educación':'#8FA8C0','Otros':'#B2BAB4','sin_categoria':'#6E7872'
+  'Alimentación':'#34D399','Restaurantes/Delivery':'#FB923C','Transporte':'#38BDF8',
+  'Hogar':'#A78BFA','Servicios/Suscripciones':'#818CF8','Salud':'#F472B6',
+  'Entretenimiento':'#FBBF24','Compras':'#2DD4BF','Retiros efectivo':'#94A3B8',
+  'Educación':'#4ADE80','Otros':'#64748B','sin_categoria':'#64748B'
 };
 var catColor = function(c){
   var p = (TEMA === 'dark') ? CAT_DARK : CAT_LIGHT;
-  return p[c] || (TEMA === 'dark' ? '#B2BAB4' : '#9AA39D');
+  return p[c] || (TEMA === 'dark' ? '#64748B' : '#94A3B8');
 };
 
 aplicarTema(TEMA);
@@ -236,8 +246,8 @@ function montar(){
   montado = true;
 }
 var ttip = function(){ return { backgroundColor:CO.tarjeta, borderColor:CO.linea, borderWidth:1,
-  textStyle:{color:CO.tinta, fontFamily:'IBM Plex Sans', fontSize:12},
-  extraCssText:'border-radius:6px;box-shadow:0 6px 20px rgba(28,35,33,.12)' }; };
+  textStyle:{color:CO.tinta, fontFamily:'Inter', fontSize:12},
+  extraCssText:'border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.18)' }; };
 
 /* ===== Render ===== */
 function render(){
@@ -304,20 +314,20 @@ function renderDonut(){
   if (!data.length){
     chDonut.clear();
     chDonut.setOption({ graphic:{type:'text',left:'center',top:'middle',
-      style:{text:'Sin gastos este mes', fill:CO.tenue, fontSize:13, fontFamily:'IBM Plex Sans'}} });
+      style:{text:'Sin gastos este mes', fill:CO.tenue, fontSize:13, fontFamily:'Inter'}} });
     return;
   }
   chDonut.setOption({
     tooltip:Object.assign({valueFormatter:function(v){ return fmt(v); }}, ttip()),
     legend:{bottom:0, left:'center', icon:'circle', itemWidth:8, itemHeight:8, itemGap:12,
-      textStyle:{color:CO.tenue, fontSize:11, fontFamily:'IBM Plex Sans'}},
+      textStyle:{color:CO.tenue, fontSize:11, fontFamily:'Inter'}},
     series:[{
       type:'pie', radius:['54%','75%'], center:['50%','44%'], avoidLabelOverlap:true, padAngle:2,
       itemStyle:{borderColor:CO.tarjeta, borderWidth:2, borderRadius:4},
       label:{show:true, position:'center',
         formatter:function(){ return '{a|' + SIMB[S.cur] + ' ' + total.toLocaleString('es-PE',{maximumFractionDigits:0}) + '}\n{b|Total mes}'; },
-        rich:{ a:{color:CO.tinta, fontSize:19, fontWeight:600, fontFamily:'IBM Plex Mono'},
-               b:{color:CO.tenue, fontSize:11, padding:[3,0,0,0], fontFamily:'IBM Plex Sans'} }},
+        rich:{ a:{color:CO.tinta, fontSize:19, fontWeight:600, fontFamily:'Space Grotesk'},
+               b:{color:CO.tenue, fontSize:11, padding:[3,0,0,0], fontFamily:'Inter'} }},
       labelLine:{show:false}, emphasis:{label:{show:true}}, data:data
     }]
   }, true);
@@ -336,7 +346,7 @@ function renderPago(){
   if (!arr.length){
     chPago.clear();
     chPago.setOption({ graphic:{type:'text',left:'center',top:'middle',
-      style:{text:'Sin datos', fill:CO.tenue, fontSize:13, fontFamily:'IBM Plex Sans'}} });
+      style:{text:'Sin datos', fill:CO.tenue, fontSize:13, fontFamily:'Inter'}} });
     return;
   }
   var a = accent();
@@ -346,12 +356,12 @@ function renderPago(){
     xAxis:{type:'value', splitLine:{show:false}, axisLabel:{show:false}, axisTick:{show:false}, axisLine:{show:false}},
     yAxis:{type:'category', data:arr.map(function(x){ return x.k; }),
       axisLine:{show:false}, axisTick:{show:false},
-      axisLabel:{color:CO.tinta, fontSize:11.5, fontFamily:'IBM Plex Sans'}},
+      axisLabel:{color:CO.tinta, fontSize:11.5, fontFamily:'Inter'}},
     series:[{
       type:'bar', data:arr.map(function(x){ return x.v; }), barWidth:14,
       itemStyle:{ borderRadius:[0,4,4,0],
         color:{type:'linear', x:0,y:0,x2:1,y2:0, colorStops:[{offset:0,color:a+'59'},{offset:1,color:a}]} },
-      label:{show:true, position:'right', color:CO.tenue, fontSize:10.5, fontFamily:'IBM Plex Mono',
+      label:{show:true, position:'right', color:CO.tenue, fontSize:10.5, fontFamily:'Space Grotesk',
         formatter:function(p){ return fmt(p.value); }}
     }]
   }, true);
