@@ -47,6 +47,14 @@ function corridaHoraria() {
     // La categorización nunca debe tumbar la ingesta: el registro es el activo.
     Logger.log('categorizarPendientes falló (la ingesta ya quedó a salvo): ' + e.message);
   }
+
+  try {
+    // Redondeo automático al ahorro: genera el traspaso a wardadito de cada
+    // compra con débito nueva. Idempotente por `redondeo|{id}`. Ver cuentas.js.
+    materializarRedondeos_(true);
+  } catch (e) {
+    Logger.log('materializarRedondeos falló (la ingesta ya quedó a salvo): ' + e.message);
+  }
 }
 
 function categorizarPendientes() {

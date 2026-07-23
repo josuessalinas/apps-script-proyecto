@@ -208,6 +208,10 @@ function cuentaDeMovimiento_(banco, metodo, tipo, moneda, desc) {
   }
 
   if (tipo === 'traspaso') {
+    // Redondeo automático al ahorro (fila sintética que generamos nosotros).
+    if (metodo === 'ahorro_redondeo')
+      return [{ cuenta: BCP, signo: -1 }, { cuenta: REDONDEO_CUENTA_DESTINO_, signo: +1 }];
+
     // Pago de tu propia tarjeta: sale de la corriente y baja la deuda.
     if (metodo === 'pago_tarjeta') {
       const card = (banco === 'BBVA') ? BBVA_TC : BCP_TC;
@@ -220,8 +224,10 @@ function cuentaDeMovimiento_(banco, metodo, tipo, moneda, desc) {
     // Lado BBVA del pago a la BFree (la salida del BCP va en su propia fila).
     if (banco === 'BBVA') return [{ cuenta: BBVA_TC, signo: -1 }];
 
-    // Movimientos del wardadito (sub-bolsillo por descripción).
-    if (desc.indexOf('wardadito') >= 0 || desc.indexOf('vivienda') >= 0 || desc.indexOf('ando') >= 0) {
+    // Movimientos del wardadito. La descripción SIEMPRE trae "wardadito"
+    // ("Aporte voluntario a wardadito Ando…", "Retiro wardadito Ando"), así que
+    // se ata a esa palabra: un nombre tipo "Fernando" ya no se cuela como Ando.
+    if (desc.indexOf('wardadito') >= 0) {
       const sub = (desc.indexOf('vivienda') >= 0) ? 'Wardadito Vivienda' : 'Wardadito Ando';
       return (desc.indexOf('retiro') >= 0)
         ? [{ cuenta: sub, signo: -1 }, { cuenta: BCP, signo: +1 }]   // retiro: vuelve a la corriente
@@ -351,4 +357,122 @@ function calcularSaldos() {
   });
   if (sinAtribuir || choqueMoneda)
     Logger.log('Avisos → sin atribuir: ' + sinAtribuir + ' · choques de moneda: ' + choqueMoneda);
+}
+
+// ========================= REDONDEO AUTOMÁTICO AL AHORRO =========================
+//
+// El BCP redondea cada compra con débito al siguiente múltiplo de 5 y guarda la
+// diferencia en un wardadito (compra S/3.50 → cobra 5, ahorra 1.50). NO lo avisa
+// por correo, así que si no lo registramos nosotros ese ahorro es invisible.
+//
+// Estas filas son SINTÉTICAS: un traspaso BCP Corriente → wardadito destino, con
+// llave `redondeo|{idCompra}` para que sea idempotente (regla 3). Solo aplica a
+// compras POSTERIORES al corte: el saldo inicial ya engloba los redondeos
+// históricos que hizo el banco. Se detiene cuando el destino llega a su meta.
+//
+// Todo configurable: para cambiar la meta o el destino, edita estas variables.
+
+const REDONDEO_MULTIPLO_ = 5;                        // se redondea al siguiente múltiplo de esto
+const REDONDEO_CUENTA_DESTINO_ = 'Wardadito Ando';   // dónde se acumula el ahorro
+const REDONDEO_META_ = 1500;                         // deja de ahorrar cuando el destino llega aquí
+
+/** Muestra qué redondeos generaría. No escribe. */
+function simularRedondeos() { materializarRedondeos_(false); }
+
+/** Escribe los redondeos que falten. Idempotente. Corre el simulacro antes. */
+function aplicarRedondeos() { materializarRedondeos_(true); }
+
+function materializarRedondeos_(escribir) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) { Logger.log('Otra corrida en curso. Salgo.'); return; }
+
+  try {
+    const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MOVIMIENTOS);
+    const cuentas = cargarCuentas_();
+    if (!cuentas) { Logger.log('No hay hoja "' + HOJA_CUENTAS + '". Corre configurarCuentas().'); return; }
+    if (!cuentas[REDONDEO_CUENTA_DESTINO_]) {
+      Logger.log('No existe la cuenta destino "' + REDONDEO_CUENTA_DESTINO_ + '" en Cuentas.'); return;
+    }
+
+    const idsExistentes = cargarIdsExistentes_(hoja);
+    const corte = fechaDeIso_(FECHA_CORTE_CUENTAS);
+    corte.setHours(23, 59, 59);
+
+    const n = hoja.getLastRow();
+    const filas = (n > 1) ? hoja.getRange(2, 1, n - 1, 14).getValues() : [];
+
+    // 1. Saldo actual del destino = inicial + efectos posteriores al corte
+    //    (incluye redondeos ya materializados y aportes/retiros voluntarios).
+    let saldoDestino = cuentas[REDONDEO_CUENTA_DESTINO_].saldo;
+    const monedaDestino = cuentas[REDONDEO_CUENTA_DESTINO_].moneda;
+    filas.forEach(function (f) {
+      const fecha = f[1];
+      if (!(fecha instanceof Date) || fecha <= corte) return;
+      const monto = Number(f[3]) || 0, moneda = String(f[4]).trim();
+      if (moneda !== monedaDestino) return;
+      const efectos = cuentaDeMovimiento_(String(f[8]), String(f[7]), String(f[2]), moneda, String(f[5]));
+      if (!efectos) return;
+      efectos.forEach(function (e) {
+        if (e.cuenta === REDONDEO_CUENTA_DESTINO_) saldoDestino += e.signo * monto;
+      });
+    });
+
+    // 2. Compras con débito del BCP posteriores al corte, en PEN, sin redondeo aún.
+    const compras = [];
+    filas.forEach(function (f) {
+      const fecha = f[1];
+      if (!(fecha instanceof Date) || fecha <= corte) return;
+      if (String(f[2]).trim() !== 'gasto') return;
+      if (String(f[7]).trim() !== 'tarjeta_debito') return;
+      if (String(f[8]).trim().toUpperCase() !== 'BCP') return;
+      if (String(f[4]).trim() !== 'PEN') return;
+      if (idsExistentes.has('redondeo|' + String(f[0]))) return;   // ya tiene su redondeo
+      compras.push({ id: String(f[0]), fecha: fecha, monto: Number(f[3]) || 0, comercio: String(f[5]) });
+    });
+    compras.sort(function (a, b) { return a.fecha - b.fecha; });
+
+    // 3. Generar redondeos en orden cronológico, hasta llegar a la meta.
+    let generados = 0, sumaAhorro = 0, detenido = false;
+    compras.forEach(function (c) {
+      if (saldoDestino >= REDONDEO_META_) { detenido = true; return; }
+
+      const resto = +(c.monto % REDONDEO_MULTIPLO_).toFixed(2);
+      const ahorro = (resto === 0) ? 0 : +(REDONDEO_MULTIPLO_ - resto).toFixed(2);
+      if (ahorro <= 0) return;   // la compra ya es múltiplo de 5
+
+      Logger.log('Compra S/ ' + c.monto.toFixed(2) + ' → ahorra S/ ' + ahorro.toFixed(2) +
+        '  (' + c.comercio.slice(0, 28) + ')');
+
+      if (escribir) {
+        escribirMovimiento_(hoja, {
+          idMensaje: 'redondeo|' + c.id,
+          fecha: c.fecha,
+          tipo: 'traspaso',
+          monto: ahorro,
+          moneda: 'PEN',
+          comercio: 'Redondeo a ' + REDONDEO_CUENTA_DESTINO_ + ' (compra: ' + c.comercio.slice(0, 30) + ')',
+          categoria: 'Traspaso',
+          metodo: 'ahorro_redondeo',
+          banco: 'BCP',
+          ultimos4: '',
+          numOperacion: '',
+          fuente: 'redondeo',
+          referencia: 'https://mail.google.com/mail/u/0/#all/' + c.id
+        });
+      }
+      saldoDestino += ahorro;
+      sumaAhorro += ahorro;
+      generados++;
+    });
+
+    Logger.log('');
+    Logger.log('Saldo ' + REDONDEO_CUENTA_DESTINO_ + ' proyectado: S/ ' + saldoDestino.toFixed(2) +
+      ' (meta S/ ' + REDONDEO_META_ + ')');
+    if (detenido) Logger.log('Se alcanzó la meta: las compras restantes no generan ahorro.');
+    Logger.log(escribir
+      ? '=== APLICADO: ' + generados + ' redondeos · S/ ' + sumaAhorro.toFixed(2) + ' ahorrado. ==='
+      : '=== SIMULACRO: ' + generados + ' redondeos · S/ ' + sumaAhorro.toFixed(2) + '. Nada se escribió. ===');
+  } finally {
+    lock.releaseLock();
+  }
 }
