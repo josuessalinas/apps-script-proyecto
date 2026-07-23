@@ -168,3 +168,187 @@ function inventarioMovimientos() {
   });
   Logger.log('Total de combinaciones distintas: ' + ordenadas.length);
 }
+
+// ========================= MOTOR DE SALDOS =========================
+
+/**
+ * Atribuye un movimiento a la(s) cuenta(s) de la hoja `Cuentas` que afecta.
+ * Devuelve [{cuenta, signo}]; el motor multiplica cada efecto por el monto.
+ *   signo +1 = sube el saldo guardado de esa cuenta (activo: entra dinero;
+ *              deuda: se debe más).
+ *   signo -1 = lo baja (activo: sale dinero; deuda: se paga).
+ * Devuelve null cuando no sabe atribuirlo, para que el motor lo marque en vez
+ * de inventar (regla: cero pérdidas silenciosas).
+ *
+ * Reglas confirmadas con el titular (2026-07-23) contra inventarioMovimientos().
+ * Se aplican de aquí en adelante, no al histórico.
+ */
+function cuentaDeMovimiento_(banco, metodo, tipo, moneda, desc) {
+  banco  = String(banco  || '').toUpperCase();
+  metodo = String(metodo || '').toLowerCase();
+  tipo   = String(tipo   || '').toLowerCase();
+  moneda = String(moneda || '').toUpperCase();
+  desc   = String(desc   || '').toLowerCase();
+
+  const BCP      = 'BCP Corriente';
+  const BBVA_DIG = 'BBVA Cuenta Digital';
+  const BCP_TC   = (moneda === 'USD') ? 'BCP Visa Light USD' : 'BCP Visa Light';
+  const BBVA_TC  = 'BBVA Visa BFree';
+  const EFECTIVO = 'Efectivo';
+
+  if (tipo === 'gasto') {
+    if (metodo === 'tarjeta_credito') return [{ cuenta: (banco === 'BBVA') ? BBVA_TC : BCP_TC, signo: +1 }];
+    if (banco === 'BBVA')             return [{ cuenta: BBVA_TC, signo: +1 }];  // consumo TC BBVA (estado de cuenta)
+    return [{ cuenta: BCP, signo: -1 }];  // débito, yape, retiro_cajero, pago_servicio, transferencia, cuenta, otro
+  }
+
+  if (tipo === 'ingreso') {
+    if (banco === 'BBVA') return [{ cuenta: BBVA_DIG, signo: +1 }];
+    return [{ cuenta: BCP, signo: +1 }];  // el dinero entra a la corriente y se queda ahí
+  }
+
+  if (tipo === 'traspaso') {
+    // Pago de tu propia tarjeta: sale de la corriente y baja la deuda.
+    if (metodo === 'pago_tarjeta') {
+      const card = (banco === 'BBVA') ? BBVA_TC : BCP_TC;
+      // En USD no tocamos la corriente (es PEN) sin convertir (regla 2): solo
+      // bajamos la deuda en dólares; el lado en soles no se modela.
+      if (moneda === 'USD') return [{ cuenta: card, signo: -1 }];
+      return [{ cuenta: BCP, signo: -1 }, { cuenta: card, signo: -1 }];
+    }
+
+    // Lado BBVA del pago a la BFree (la salida del BCP va en su propia fila).
+    if (banco === 'BBVA') return [{ cuenta: BBVA_TC, signo: -1 }];
+
+    // Movimientos del wardadito (sub-bolsillo por descripción).
+    if (desc.indexOf('wardadito') >= 0 || desc.indexOf('vivienda') >= 0 || desc.indexOf('ando') >= 0) {
+      const sub = (desc.indexOf('vivienda') >= 0) ? 'Wardadito Vivienda' : 'Wardadito Ando';
+      return (desc.indexOf('retiro') >= 0)
+        ? [{ cuenta: sub, signo: -1 }, { cuenta: BCP, signo: +1 }]   // retiro: vuelve a la corriente
+        : [{ cuenta: BCP, signo: -1 }, { cuenta: sub, signo: +1 }];  // aporte voluntario
+    }
+
+    // Depósito de efectivo a la corriente.
+    if (desc.indexOf('dep') >= 0) return [{ cuenta: EFECTIVO, signo: -1 }, { cuenta: BCP, signo: +1 }];
+
+    // Transferencia a mi nombre → mi BBVA Cuenta Digital.
+    if (metodo === 'transferencia') return [{ cuenta: BCP, signo: -1 }, { cuenta: BBVA_DIG, signo: +1 }];
+
+    return null;  // sin atribuir: que el motor lo marque
+  }
+
+  return null;
+}
+
+/** Lee la hoja `Cuentas` y devuelve { nombre: {moneda, tipo, saldo} }. */
+function cargarCuentas_() {
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_CUENTAS);
+  if (!hoja || hoja.getLastRow() < 2) return null;
+  const filas = hoja.getRange(2, 1, hoja.getLastRow() - 1, ENCABEZADOS_CUENTAS.length).getValues();
+  const mapa = {};
+  filas.forEach(function (f) {
+    mapa[String(f[0]).trim()] = { moneda: String(f[2]).trim(), tipo: String(f[1]).trim(), saldo: Number(f[4]) || 0 };
+  });
+  return mapa;
+}
+
+/**
+ * DIAGNÓSTICO de atribución (solo lectura). Recorre TODO el histórico, resuelve
+ * cada movimiento con cuentaDeMovimiento_ y muestra, por combinación, a qué
+ * cuentas se traduce y cuántas filas. Sirve para validar las reglas contra los
+ * datos reales antes de confiar en calcularSaldos(). No escribe nada.
+ */
+function diagnosticoAtribucion() {
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MOVIMIENTOS);
+  const n = hoja.getLastRow();
+  if (n < 2) { Logger.log('La hoja "' + HOJA_MOVIMIENTOS + '" está vacía.'); return; }
+  const cuentas = cargarCuentas_();
+  if (!cuentas) { Logger.log('No hay hoja "' + HOJA_CUENTAS + '". Corre configurarCuentas().'); return; }
+
+  const filas = hoja.getRange(2, 1, n - 1, 14).getValues();
+  const tally = {};   // clave combo → { firma → conteo }
+  let sinAtribuir = 0, choqueMoneda = 0;
+
+  filas.forEach(function (f) {
+    const tipo = String(f[2]).trim(), moneda = String(f[4]).trim();
+    const desc = String(f[5]).trim(), metodo = String(f[7]).trim(), banco = String(f[8]).trim();
+    const combo = (banco || '∅') + '·' + (metodo || '∅') + '·' + tipo + '·' + moneda;
+
+    const efectos = cuentaDeMovimiento_(banco, metodo, tipo, moneda, desc);
+    let firma;
+    if (!efectos) { firma = '⚠ SIN ATRIBUIR'; sinAtribuir++; }
+    else {
+      firma = efectos.map(function (e) {
+        const c = cuentas[e.cuenta];
+        if (!c) return '⚠ cuenta inexistente: ' + e.cuenta;
+        if (c.moneda !== moneda) { choqueMoneda++; return '⚠ moneda ' + e.cuenta + ' (' + c.moneda + '≠' + moneda + ')'; }
+        return (e.signo > 0 ? '+' : '−') + e.cuenta;
+      }).join('  ,  ');
+    }
+    if (!tally[combo]) tally[combo] = {};
+    tally[combo][firma] = (tally[combo][firma] || 0) + 1;
+  });
+
+  Logger.log('=== Atribución de ' + (n - 1) + ' movimientos ===');
+  Object.keys(tally).sort().forEach(function (combo) {
+    Logger.log('· ' + combo);
+    Object.keys(tally[combo]).forEach(function (firma) {
+      Logger.log('     ' + tally[combo][firma] + '×   → ' + firma);
+    });
+  });
+  Logger.log('Sin atribuir: ' + sinAtribuir + ' · choques de moneda: ' + choqueMoneda);
+}
+
+/**
+ * Calcula el saldo actual de cada cuenta = saldo inicial (hoja `Cuentas`) + los
+ * flujos POSTERIORES a la fecha de corte, atribuidos con cuentaDeMovimiento_.
+ * Solo lee; imprime el resultado por moneda. Movimientos anteriores al corte no
+ * se aplican (el saldo inicial ya los engloba: "foto de hoy y hacia adelante").
+ */
+function calcularSaldos() {
+  const cuentas = cargarCuentas_();
+  if (!cuentas) { Logger.log('No hay hoja "' + HOJA_CUENTAS + '". Corre configurarCuentas().'); return; }
+
+  const saldo = {};
+  Object.keys(cuentas).forEach(function (c) { saldo[c] = cuentas[c].saldo; });
+
+  const corte = fechaDeIso_(FECHA_CORTE_CUENTAS);
+  corte.setHours(23, 59, 59);
+
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MOVIMIENTOS);
+  const n = hoja.getLastRow();
+  const filas = (n > 1) ? hoja.getRange(2, 1, n - 1, 14).getValues() : [];
+  let aplicados = 0, sinAtribuir = 0, choqueMoneda = 0;
+
+  filas.forEach(function (f) {
+    const fecha = f[1];
+    if (!(fecha instanceof Date) || fecha <= corte) return;  // solo posteriores al corte
+    const monto = Number(f[3]) || 0, moneda = String(f[4]).trim();
+    const efectos = cuentaDeMovimiento_(String(f[8]), String(f[7]), String(f[2]), moneda, String(f[5]));
+    if (!efectos) { sinAtribuir++; return; }
+    efectos.forEach(function (e) {
+      const c = cuentas[e.cuenta];
+      if (!c) return;
+      if (c.moneda !== moneda) { choqueMoneda++; return; }  // no mezclar monedas (regla 2)
+      saldo[e.cuenta] += e.signo * monto;
+    });
+    aplicados++;
+  });
+
+  Logger.log('=== Saldos al día (corte ' + FECHA_CORTE_CUENTAS + ' + ' + aplicados + ' flujos posteriores) ===');
+  const porMoneda = {};
+  Object.keys(cuentas).forEach(function (c) {
+    const m = cuentas[c].moneda;
+    (porMoneda[m] = porMoneda[m] || []).push(c);
+  });
+  Object.keys(porMoneda).sort().forEach(function (m) {
+    const simbolo = (m === 'PEN') ? 'S/' : (m === 'USD') ? 'US$' : m;
+    Logger.log('· ' + m);
+    porMoneda[m].forEach(function (c) {
+      Logger.log('    ' + c + ': ' + simbolo + ' ' + saldo[c].toFixed(2) +
+        '  (' + cuentas[c].tipo + ')');
+    });
+  });
+  if (sinAtribuir || choqueMoneda)
+    Logger.log('Avisos → sin atribuir: ' + sinAtribuir + ' · choques de moneda: ' + choqueMoneda);
+}
