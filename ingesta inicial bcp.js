@@ -171,7 +171,9 @@ function parseBCP_(text, messageId) {
   if (!mCom) throw new Error('No se encontró "Empresa"');
   const comercio = mCom[1].trim();
 
-  // Débito verificado; crédito PROVISIONAL hasta traer un correo real de crédito.
+  // Débito y crédito verificados contra correos reales (crédito: modelo-consumo-tccredito-BCP.html,
+  // 2026-07-23). "Tarjeta de Crédito" aparece 5 veces en el correo; solo la fila "Número de Tarjeta
+  // de Crédito ***…5176" lleva dígitos detrás, y el regex no-codicioso engancha esa, no las señuelo.
   const mTarjeta = text.match(/Tarjeta de (D[ée]bito|Cr[ée]dito)\s*\**(\d{4})/);
   const metodo = (mTarjeta && /Cr/i.test(mTarjeta[1])) ? 'tarjeta_credito' : 'tarjeta_debito';
 
