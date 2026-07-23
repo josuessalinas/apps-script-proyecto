@@ -38,6 +38,14 @@ function doGet(e) {
       .setTitle('Saldos por cuenta')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
   }
+  // Ruta: registro manual de un movimiento
+  if (pagina.page === 'registro') {
+    const t = HtmlService.createTemplateFromFile('registro');
+    t.url = ScriptApp.getService().getUrl();
+    return t.evaluate()
+      .setTitle('Registrar movimiento')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   // Ruta: móvil
   if (pagina.page === 'movil') {
     const t = HtmlService.createTemplateFromFile('movil');
