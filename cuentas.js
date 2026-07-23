@@ -25,7 +25,7 @@
 
 const HOJA_CUENTAS = 'Cuentas';
 const ENCABEZADOS_CUENTAS =
-  ['Cuenta', 'Tipo', 'Moneda', 'Grupo', 'Saldo Inicial', 'Fecha Corte', 'Nota'];
+  ['Cuenta', 'Tipo', 'Moneda', 'Grupo', 'Saldo Inicial', 'Fecha Corte', 'Nota', 'Límite/Meta'];
 
 /** El saldo real declarado por el titular vale a esta fecha (yyyy-MM-dd). */
 const FECHA_CORTE_CUENTAS = '2026-07-23';
@@ -36,16 +36,16 @@ const FECHA_CORTE_CUENTAS = '2026-07-23';
  * El saldo de una deuda es lo que se DEBE (positivo); resta del patrimonio.
  */
 const CUENTAS_INICIALES_ = [
-  { cuenta: 'Efectivo',            tipo: 'activo',           moneda: 'PEN', grupo: '',          saldo: 20.00,   nota: 'no se rastrea tras salir' },
-  { cuenta: 'BCP Corriente',       tipo: 'activo',           moneda: 'PEN', grupo: '',          saldo: 14.94,   nota: 'Yape = débito = misma cuenta' },
-  { cuenta: 'Wardadito Vivienda',  tipo: 'activo',           moneda: 'PEN', grupo: 'Wardadito', saldo: 1000.00, nota: 'meta 1000, completa' },
-  { cuenta: 'Wardadito Ando',      tipo: 'activo',           moneda: 'PEN', grupo: 'Wardadito', saldo: 1262.62, nota: 'meta 1500; redondeo a 5 de compras débito' },
-  { cuenta: 'Wardadito Intereses', tipo: 'activo',           moneda: 'PEN', grupo: 'Wardadito', saldo: 1.05,    nota: 'intereses abonados por el banco' },
-  { cuenta: 'BBVA Cuenta Digital', tipo: 'activo',           moneda: 'PEN', grupo: '',          saldo: 657.81,  nota: 'débito, aparte de la tarjeta' },
-  { cuenta: 'BBVA Respaldo BFree', tipo: 'activo_bloqueado', moneda: 'PEN', grupo: '',          saldo: 500.00,  nota: 'garantía de la Visa BFree; se devuelve, fecha incierta' },
-  { cuenta: 'BCP Visa Light',      tipo: 'deuda',            moneda: 'PEN', grupo: '',          saldo: 131.52,  nota: 'línea S/800; deuda por pagar' },
-  { cuenta: 'BCP Visa Light USD',  tipo: 'deuda',            moneda: 'USD', grupo: '',          saldo: 24.59,   nota: 'deuda en dólares de la misma tarjeta' },
-  { cuenta: 'BBVA Visa BFree',     tipo: 'deuda',            moneda: 'PEN', grupo: '',          saldo: 100.00,  nota: 'respaldo S/500 bloqueado aparte' },
+  { cuenta: 'Efectivo',            tipo: 'activo',           moneda: 'PEN', grupo: '',          saldo: 20.00,   meta: '',     nota: 'no se rastrea tras salir' },
+  { cuenta: 'BCP Corriente',       tipo: 'activo',           moneda: 'PEN', grupo: '',          saldo: 14.94,   meta: '',     nota: 'Yape = débito = misma cuenta' },
+  { cuenta: 'Wardadito Vivienda',  tipo: 'activo',           moneda: 'PEN', grupo: 'Wardadito', saldo: 1000.00, meta: 1000,   nota: 'meta 1000, completa' },
+  { cuenta: 'Wardadito Ando',      tipo: 'activo',           moneda: 'PEN', grupo: 'Wardadito', saldo: 1262.62, meta: 1500,   nota: 'meta 1500; redondeo a 5 de compras débito' },
+  { cuenta: 'Wardadito Intereses', tipo: 'activo',           moneda: 'PEN', grupo: 'Wardadito', saldo: 1.05,    meta: '',     nota: 'intereses abonados por el banco' },
+  { cuenta: 'BBVA Cuenta Digital', tipo: 'activo',           moneda: 'PEN', grupo: '',          saldo: 657.81,  meta: '',     nota: 'débito, aparte de la tarjeta' },
+  { cuenta: 'BBVA Respaldo BFree', tipo: 'activo_bloqueado', moneda: 'PEN', grupo: '',          saldo: 500.00,  meta: '',     nota: 'garantía de la Visa BFree; se devuelve, fecha incierta' },
+  { cuenta: 'BCP Visa Light',      tipo: 'deuda',            moneda: 'PEN', grupo: '',          saldo: 131.52,  meta: 800,    nota: 'línea de crédito S/800' },
+  { cuenta: 'BCP Visa Light USD',  tipo: 'deuda',            moneda: 'USD', grupo: '',          saldo: 24.59,   meta: '',     nota: 'deuda en dólares de la misma tarjeta' },
+  { cuenta: 'BBVA Visa BFree',     tipo: 'deuda',            moneda: 'PEN', grupo: '',          saldo: 100.00,  meta: 500,    nota: 'línea de crédito S/500 (respaldo)' },
 ];
 
 /**
@@ -74,7 +74,7 @@ function configurarCuentas() {
     hoja.setFrozenRows(1);
 
     const filas = CUENTAS_INICIALES_.map(function (c) {
-      return [c.cuenta, c.tipo, c.moneda, c.grupo, c.saldo, FECHA_CORTE_CUENTAS, c.nota];
+      return [c.cuenta, c.tipo, c.moneda, c.grupo, c.saldo, FECHA_CORTE_CUENTAS, c.nota, c.meta];
     });
     hoja.getRange(2, 1, filas.length, ENCABEZADOS_CUENTAS.length).setValues(filas);
 
@@ -246,16 +246,46 @@ function cuentaDeMovimiento_(banco, metodo, tipo, moneda, desc) {
   return null;
 }
 
-/** Lee la hoja `Cuentas` y devuelve { nombre: {moneda, tipo, saldo} }. */
+/** Lee la hoja `Cuentas` y devuelve { nombre: {moneda, tipo, grupo, saldo, meta} }.
+ *  Tolera hojas viejas sin la columna Límite/Meta (meta queda null). */
 function cargarCuentas_() {
   const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_CUENTAS);
   if (!hoja || hoja.getLastRow() < 2) return null;
-  const filas = hoja.getRange(2, 1, hoja.getLastRow() - 1, ENCABEZADOS_CUENTAS.length).getValues();
+  const cols = hoja.getLastColumn();
+  const filas = hoja.getRange(2, 1, hoja.getLastRow() - 1, cols).getValues();
   const mapa = {};
   filas.forEach(function (f) {
-    mapa[String(f[0]).trim()] = { moneda: String(f[2]).trim(), tipo: String(f[1]).trim(), saldo: Number(f[4]) || 0 };
+    const meta = (cols >= 8 && f[7] !== '' && f[7] != null) ? Number(f[7]) : null;
+    mapa[String(f[0]).trim()] = {
+      moneda: String(f[2]).trim(), tipo: String(f[1]).trim(),
+      grupo: String(f[3]).trim(), saldo: Number(f[4]) || 0, meta: meta
+    };
   });
   return mapa;
+}
+
+/**
+ * Migración: agrega/rellena la columna "Límite/Meta" en una hoja `Cuentas` que
+ * se creó antes de que existiera. Idempotente, NO toca los saldos (que pudiste
+ * ajustar a mano): solo escribe la meta/límite de cada cuenta por su nombre.
+ */
+function actualizarMetasCuentas() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) { Logger.log('Otra corrida en curso. Salgo.'); return; }
+  try {
+    const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_CUENTAS);
+    if (!hoja || hoja.getLastRow() < 2) { Logger.log('No hay hoja "' + HOJA_CUENTAS + '".'); return; }
+    hoja.getRange(1, 8).setValue('Límite/Meta').setFontWeight('bold');
+    const metas = {};
+    CUENTAS_INICIALES_.forEach(function (c) { metas[c.cuenta] = (c.meta === '' || c.meta == null) ? '' : c.meta; });
+    const nombres = hoja.getRange(2, 1, hoja.getLastRow() - 1, 1).getValues();
+    const col = nombres.map(function (r) {
+      const m = metas[String(r[0]).trim()];
+      return [m == null ? '' : m];
+    });
+    hoja.getRange(2, 8, col.length, 1).setValues(col);
+    Logger.log('Columna "Límite/Meta" actualizada en ' + col.length + ' cuentas.');
+  } finally { lock.releaseLock(); }
 }
 
 /**
@@ -475,4 +505,86 @@ function materializarRedondeos_(escribir) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ========================= API PARA LA VISTA =========================
+
+/**
+ * Núcleo del motor: devuelve { cuentas, saldo } con el saldo vivo de cada cuenta
+ * = saldo inicial + flujos posteriores al corte. Lo usan calcularSaldos() (log)
+ * y obtenerSaldos() (vista). No escribe nada.
+ */
+function saldosVivos_() {
+  const cuentas = cargarCuentas_();
+  if (!cuentas) return null;
+
+  const saldo = {};
+  Object.keys(cuentas).forEach(function (c) { saldo[c] = cuentas[c].saldo; });
+
+  const corte = fechaDeIso_(FECHA_CORTE_CUENTAS);
+  corte.setHours(23, 59, 59);
+
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_MOVIMIENTOS);
+  const n = hoja ? hoja.getLastRow() : 0;
+  const filas = (n > 1) ? hoja.getRange(2, 1, n - 1, 14).getValues() : [];
+
+  filas.forEach(function (f) {
+    const fecha = f[1];
+    if (!(fecha instanceof Date) || fecha <= corte) return;
+    const monto = Number(f[3]) || 0, moneda = String(f[4]).trim();
+    const efectos = cuentaDeMovimiento_(String(f[8]), String(f[7]), String(f[2]), moneda, String(f[5]));
+    if (!efectos) return;
+    efectos.forEach(function (e) {
+      const c = cuentas[e.cuenta];
+      if (!c || c.moneda !== moneda) return;   // cuenta inexistente o moneda distinta
+      saldo[e.cuenta] += e.signo * monto;
+    });
+  });
+
+  return { cuentas: cuentas, saldo: saldo };
+}
+
+/**
+ * Datos ya listos para `saldos.html`. Devuelve totales por moneda (líquido,
+ * bloqueado, deuda, patrimonio) y la lista de cuentas con su saldo vivo, meta y
+ * —para tarjetas y ahorros— el porcentaje y el disponible. El HTML no calcula.
+ */
+function obtenerSaldos() {
+  const vivos = saldosVivos_();
+  if (!vivos) return { error: 'No hay hoja "Cuentas". Corre configurarCuentas() y actualizarMetasCuentas().' };
+
+  const cuentas = vivos.cuentas, saldo = vivos.saldo;
+  const monedas = {};
+  const lista = [];
+
+  Object.keys(cuentas).forEach(function (nombre) {
+    const c = cuentas[nombre];
+    const s = +(saldo[nombre]).toFixed(2);
+    const m = c.moneda;
+    if (!monedas[m]) monedas[m] = { liquido: 0, bloqueado: 0, deuda: 0 };
+    if (c.tipo === 'activo') monedas[m].liquido += s;
+    else if (c.tipo === 'activo_bloqueado') monedas[m].bloqueado += s;
+    else if (c.tipo === 'deuda') monedas[m].deuda += s;
+
+    const item = { cuenta: nombre, tipo: c.tipo, moneda: m, grupo: c.grupo, saldo: s, meta: c.meta };
+    if (c.meta) {
+      if (c.tipo === 'deuda') {
+        item.disponible = +(c.meta - s).toFixed(2);
+        item.pct = Math.max(0, Math.min(100, (item.disponible / c.meta) * 100));
+      } else {
+        item.pct = Math.max(0, Math.min(100, (s / c.meta) * 100));
+      }
+    }
+    lista.push(item);
+  });
+
+  Object.keys(monedas).forEach(function (m) {
+    const b = monedas[m];
+    b.liquido = +b.liquido.toFixed(2);
+    b.bloqueado = +b.bloqueado.toFixed(2);
+    b.deuda = +b.deuda.toFixed(2);
+    b.patrimonio = +(b.liquido + b.bloqueado - b.deuda).toFixed(2);
+  });
+
+  return { corte: FECHA_CORTE_CUENTAS, monedas: monedas, cuentas: lista };
 }

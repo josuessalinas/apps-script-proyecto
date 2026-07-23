@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Saldos por cuenta</title>
+<base target="_top">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0A0E17; --panel:#111827; --elev:#161F33; --line:#243049;
+    --text:#E8ECF6; --muted:#8695B0; --faint:#5A6684;
+    --accent:#A78BFA; --accent-soft:rgba(167,139,250,.14);
+    --income:#34D399; --expense:#FB7185; --savings:#FBBF24; --blocked:#94A3B8;
+    --radius:16px;
+    --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 12px 32px -18px rgba(0,0,0,.8);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(167,139,250,.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 10%, rgba(56,189,248,.06), transparent 55%),
+      var(--ink);
+    color:var(--text); font-family:Inter,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; padding-bottom:56px;
+  }
+  .num{font-family:"Space Grotesk",Inter,sans-serif; font-variant-numeric:tabular-nums; letter-spacing:-.01em}
+
+  header{
+    position:sticky; top:0; z-index:20; backdrop-filter:blur(14px);
+    background:linear-gradient(180deg,rgba(10,14,23,.92),rgba(10,14,23,.72));
+    border-bottom:1px solid var(--line);
+  }
+  .bar{max-width:1100px; margin:0 auto; padding:14px 22px; display:flex; align-items:center; gap:18px; flex-wrap:wrap}
+  .brand{display:flex; align-items:baseline; gap:12px; margin-right:auto}
+  .brand h1{font-family:"Space Grotesk"; font-size:19px; font-weight:600; margin:0; letter-spacing:-.02em}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft);align-self:center}
+  .brand .sub{font-size:12px;color:var(--faint)}
+  .controls{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+
+  main{max-width:1100px; margin:0 auto; padding:22px}
+
+  .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px}
+  .kpi{background:linear-gradient(180deg,var(--elev),var(--panel)); border:1px solid var(--line); border-radius:var(--radius); padding:15px 16px; box-shadow:var(--shadow); position:relative; overflow:hidden}
+  .kpi .lab{font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); margin-bottom:8px}
+  .kpi .val{font-size:24px; font-weight:600}
+  .kpi .sub{font-size:12px; color:var(--faint); margin-top:3px}
+  .kpi .tick{position:absolute; right:0; top:0; bottom:0; width:3px}
+
+  .grid{display:grid; grid-template-columns:repeat(12,1fr); gap:16px}
+  .card{background:linear-gradient(180deg,var(--elev),var(--panel)); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px 18px; min-width:0}
+  .card h2{font-family:"Space Grotesk"; font-size:14px; font-weight:600; margin:0 0 2px; letter-spacing:-.01em}
+  .card p.hint{font-size:12px; color:var(--faint); margin:0 0 12px}
+  .col-6{grid-column:span 6} .col-12{grid-column:span 12}
+
+  .row{display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:11px 0; border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .nm{font-size:13.5px; color:var(--text)}
+  .row .nt{font-size:11.5px; color:var(--faint); margin-top:2px}
+  .row .amt{font-size:15px; font-weight:600; white-space:nowrap}
+
+  .prog{padding:12px 0; border-bottom:1px solid var(--line)}
+  .prog:last-child{border-bottom:0}
+  .prog .top{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:8px}
+  .prog .nm{font-size:13.5px}
+  .prog .meta{font-size:12px; color:var(--muted)}
+  .prog .amt{font-size:14px; font-weight:600}
+  .track{height:9px; border-radius:999px; background:var(--line); overflow:hidden}
+  .track > span{display:block; height:100%; border-radius:999px; transition:width .5s ease}
+  .done{color:var(--income); font-size:12px; font-weight:600}
+
+  footer{max-width:1100px;margin:22px auto 0;padding:0 22px;color:var(--faint);font-size:12px;line-height:1.6}
+
+  .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;
+    background:var(--panel);border:1px solid var(--line);border-radius:11px;color:var(--muted);cursor:pointer;transition:.18s}
+  .icon-btn:hover{color:var(--text);border-color:var(--accent)}
+  .icon-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent-soft),0 0 0 1px var(--accent)}
+  .icon-btn svg{width:18px;height:18px}
+  .icon-btn .ico-moon{display:none}
+  :root[data-theme="light"] .icon-btn .ico-sun{display:none}
+  :root[data-theme="light"] .icon-btn .ico-moon{display:inline}
+  .icon-btn.spinning svg{animation:spin 1s linear infinite}
+
+  .back{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;
+    color:var(--muted);text-decoration:none;border:1px solid var(--line);font-size:20px;line-height:1;transition:.18s}
+  .back:hover{color:var(--text);border-color:var(--accent)}
+
+  .overlay{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:16px;background:var(--ink);color:var(--muted);font-size:14px;text-align:center;padding:24px;transition:opacity .35s}
+  .overlay.hidden{opacity:0;pointer-events:none}
+  #ovmsg{max-width:420px;line-height:1.5}
+  .spin{width:34px;height:34px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .btn-retry{font-family:"Space Grotesk";font-weight:600;font-size:13px;color:var(--text);background:var(--panel);
+    border:1px solid var(--accent);border-radius:10px;padding:9px 18px;cursor:pointer}
+
+  :root[data-theme="light"]{
+    --ink:#EDF1F8; --panel:#FFFFFF; --elev:#FFFFFF; --line:#E4EAF5;
+    --text:#1B2436; --muted:#5A6A86; --faint:#9AA6BF;
+    --shadow:0 1px 0 rgba(255,255,255,.7) inset, 0 14px 30px -22px rgba(31,45,74,.38);
+  }
+  :root[data-theme="light"] header{ background:linear-gradient(180deg,rgba(237,241,248,.92),rgba(237,241,248,.70)); }
+  :root[data-theme="light"] .kpi, :root[data-theme="light"] .card{border-color:#E9EEF7}
+
+  @media (max-width:860px){ .kpis{grid-template-columns:repeat(2,1fr)} .col-6{grid-column:span 12} }
+  @media (max-width:560px){ .bar{padding:12px 14px} main{padding:14px} }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+<script>document.documentElement.setAttribute("data-theme",(window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches)?"light":"dark");</script>
+</head>
+<body>
+<div id="overlay" class="overlay">
+  <div class="spin" aria-hidden="true"></div>
+  <div id="ovmsg">Calculando tus saldos…</div>
+  <button id="retryBtn" class="btn-retry" style="display:none">Reintentar</button>
+</div>
+
+<header>
+  <div class="bar">
+    <div class="brand">
+      <a class="back" href="<?= url ?>" title="Volver al tablero" aria-label="Volver al tablero">‹</a>
+      <span class="dot"></span>
+      <h1>Saldos</h1>
+      <span class="sub" id="corte"></span>
+    </div>
+    <div class="controls">
+      <button id="refreshBtn" class="icon-btn" aria-label="Actualizar" title="Actualizar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      </button>
+      <button id="themeBtn" class="icon-btn" aria-label="Modo claro / oscuro" title="Modo claro / oscuro">
+        <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="kpis" id="kpis"></section>
+  <section class="grid" id="grid"></section>
+  <footer id="foot"></footer>
+</main>
+
+<script>
+const CUR = { PEN:"S/", USD:"US$" };
+const fmt = (cur,v) => (CUR[cur]||cur)+" "+ new Intl.NumberFormat("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ---------- tema ---------- */
+function applyTheme(mode){ document.documentElement.setAttribute("data-theme", mode); }
+applyTheme((window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark");
+document.getElementById("themeBtn").addEventListener("click", ()=>{
+  const next = document.documentElement.getAttribute("data-theme")==="light" ? "dark" : "light";
+  applyTheme(next);
+});
+
+/* ---------- overlay ---------- */
+function ov(msg, retry){
+  document.getElementById("overlay").classList.remove("hidden");
+  document.getElementById("ovmsg").textContent = msg;
+  document.getElementById("retryBtn").style.display = retry ? "" : "none";
+}
+
+/* ---------- render ---------- */
+function kpiTile(lab, val, tick, sub){
+  return `<div class="kpi"><div class="tick" style="background:${tick}"></div>`+
+    `<div class="lab">${lab}</div><div class="val num">${val}</div>`+
+    (sub?`<div class="sub">${sub}</div>`:"")+`</div>`;
+}
+
+function rowLiquido(c){
+  return `<div class="row"><div><div class="nm">${esc(c.cuenta)}</div></div>`+
+    `<div class="amt num">${fmt(c.moneda, c.saldo)}</div></div>`;
+}
+
+function rowAhorro(c){
+  if(!c.meta){
+    return `<div class="prog"><div class="top"><span class="nm">${esc(c.cuenta)}</span>`+
+      `<span class="amt num">${fmt(c.moneda,c.saldo)}</span></div></div>`;
+  }
+  const full = c.saldo >= c.meta - 0.005;
+  const col = full ? "var(--income)" : "var(--savings)";
+  return `<div class="prog"><div class="top"><span class="nm">${esc(c.cuenta)} `+
+    (full?`<span class="done">✓ meta</span>`:"")+`</span>`+
+    `<span class="meta num">${fmt(c.moneda,c.saldo)} <span style="color:var(--faint)">/ ${fmt(c.moneda,c.meta)}</span></span></div>`+
+    `<div class="track"><span style="width:${c.pct.toFixed(1)}%;background:${col}"></span></div></div>`;
+}
+
+function rowCredito(c){
+  if(!c.meta){ // sin límite conocido (ej. deuda USD): solo la deuda
+    return `<div class="prog"><div class="top"><span class="nm">${esc(c.cuenta)}</span>`+
+      `<span class="amt num" style="color:var(--expense)">${fmt(c.moneda,c.saldo)} deuda</span></div></div>`;
+  }
+  return `<div class="prog"><div class="top"><span class="nm">${esc(c.cuenta)}</span>`+
+    `<span class="meta num" style="color:var(--income)">${fmt(c.moneda,c.disponible)} libre</span></div>`+
+    `<div class="track"><span style="width:${c.pct.toFixed(1)}%;background:var(--income)"></span></div>`+
+    `<div class="top" style="margin-top:7px;margin-bottom:0"><span class="meta">Deuda ${fmt(c.moneda,c.saldo)}</span>`+
+    `<span class="meta">Línea ${fmt(c.moneda,c.meta)}</span></div></div>`;
+}
+
+function render(data){
+  document.getElementById("corte").textContent = "al "+data.corte;
+
+  const pen = data.monedas.PEN || {liquido:0,bloqueado:0,deuda:0,patrimonio:0};
+  const usd = data.monedas.USD || {deuda:0,patrimonio:0};
+  document.getElementById("kpis").innerHTML =
+    kpiTile("Líquido disponible", fmt("PEN",pen.liquido), "var(--accent)") +
+    kpiTile("Patrimonio neto", fmt("PEN",pen.patrimonio), "var(--income)", "líquido + bloqueado − deuda") +
+    kpiTile("Deuda tarjetas", fmt("PEN",pen.deuda), "var(--expense)") +
+    kpiTile("Deuda en dólares", fmt("USD",usd.deuda||0), "var(--expense)");
+
+  const A = data.cuentas;
+  const liquido  = A.filter(c=>c.tipo==="activo" && c.grupo!=="Wardadito");
+  const ahorros  = A.filter(c=>c.tipo==="activo" && c.grupo==="Wardadito");
+  const creditos = A.filter(c=>c.tipo==="deuda");
+  const bloq     = A.filter(c=>c.tipo==="activo_bloqueado");
+
+  let html = "";
+  html += `<div class="card col-6"><h2>Líquido disponible</h2><p class="hint">Lo que puedes usar ya</p>`+
+    liquido.map(rowLiquido).join("") + `</div>`;
+  html += `<div class="card col-6"><h2>Ahorros · wardaditos</h2><p class="hint">Progreso hacia cada meta</p>`+
+    ahorros.map(rowAhorro).join("") + `</div>`;
+  html += `<div class="card col-6"><h2>Líneas de crédito</h2><p class="hint">Cuánto te queda disponible en cada tarjeta</p>`+
+    creditos.map(rowCredito).join("") + `</div>`;
+  if(bloq.length){
+    html += `<div class="card col-6"><h2>Bloqueado</h2><p class="hint">Activo tuyo, no disponible por ahora</p>`+
+      bloq.map(rowLiquido).join("") + `</div>`;
+  }
+  document.getElementById("grid").innerHTML = html;
+
+  document.getElementById("foot").innerHTML =
+    "Saldo = saldo inicial declarado al corte + los movimientos posteriores, atribuidos a cada cuenta. "+
+    "PEN y USD no se mezclan. Las metas se editan en la hoja <b>Cuentas</b>.";
+}
+
+/* ---------- carga ---------- */
+function cargar(){
+  if(typeof google==="undefined" || !google.script || !google.script.run){
+    ov("Esta página se ejecuta dentro de tu web app de Apps Script (ruta ?page=saldos).", false);
+    return;
+  }
+  ov("Calculando tus saldos…", false);
+  document.getElementById("refreshBtn").classList.add("spinning");
+  google.script.run
+    .withSuccessHandler(onData)
+    .withFailureHandler(onError)
+    .obtenerSaldos();
+}
+function onData(data){
+  document.getElementById("refreshBtn").classList.remove("spinning");
+  if(!data || data.error){ ov(data && data.error ? data.error : "Sin datos.", true); return; }
+  render(data);
+  document.getElementById("overlay").classList.add("hidden");
+}
+function onError(err){
+  document.getElementById("refreshBtn").classList.remove("spinning");
+  ov("No se pudieron cargar los saldos: " + (err && err.message ? err.message : err), true);
+}
+document.getElementById("retryBtn").addEventListener("click", cargar);
+document.getElementById("refreshBtn").addEventListener("click", cargar);
+cargar();
+</script>
+</body>
+</html>

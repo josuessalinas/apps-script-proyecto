@@ -30,6 +30,14 @@ function doGet(e) {
       .setTitle('Análisis financiero')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
   }
+  // Ruta: saldos por cuenta
+  if (pagina.page === 'saldos') {
+    const t = HtmlService.createTemplateFromFile('saldos');
+    t.url = ScriptApp.getService().getUrl();
+    return t.evaluate()
+      .setTitle('Saldos por cuenta')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   // Ruta: móvil
   if (pagina.page === 'movil') {
     const t = HtmlService.createTemplateFromFile('movil');
